@@ -1,0 +1,19 @@
+{
+  "name": "spyweb",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.166.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vite": "^5.3.0",
+    "@types/three": "^0.166.0"
+  }
+}
