@@ -2,6 +2,8 @@
 
 *A Mediterranean Infiltration — 1963*
 
+A game by **Victor Sanchez Belmar** ([@VSBDev](https://github.com/VSBDev))
+
 A 3D stealth game for the browser, built with Three.js + TypeScript. Every mesh, texture,
 and sound is generated procedurally in code — there are no asset files.
 
