@@ -49,6 +49,19 @@ export function building(o: BuildingOpts): THREE.Group {
   const body = box(o.w, o.h, o.d, wallMat, 0, o.h / 2, 0);
   g.add(body);
 
+  // facade variety (seeded): darker plinth base + stone corner quoins
+  g.add(box(o.w + 0.08, 0.42, o.d + 0.08, mat(0xb9a98f, { map: "plaster", repeat: [3, 0.4] }), 0, 0.21, 0));
+  if (rng() < 0.55) {
+    const quoinM = mat(0xd6cdbb, { map: "stone", repeat: [0.4, 0.3] });
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      for (let qy = 0.65; qy < o.h - 0.3; qy += 0.58) {
+        const q = box(0.34, 0.26, 0.34, quoinM, sx * o.w / 2, qy, sz * o.d / 2);
+        q.position.x -= sx * 0.02; q.position.z -= sz * 0.02;
+        g.add(q);
+      }
+    }
+  }
+
   // roof — built in "ridge space" (ridge along local X, the building's LONG
   // axis) then rotated into place, so slopes and gables always face correctly
   const style = o.roofStyle ?? "gable";
@@ -72,7 +85,8 @@ export function building(o: BuildingOpts): THREE.Group {
     const ec = across / 2 + overhang;  // eave half-width across the slopes
     // gable: full-length ridge; hip: ridge shrinks so end slopes pitch inward
     const ridgeHalf = style === "hip" ? Math.max(0.5, along / 2 - across / 2) : ea;
-    const roofMat = mat(0xffffff, { map: "roof", repeat: [along / 3, 2] });
+    const roofTints = [0xffffff, 0xe8d0bc, 0xd9bfa8];
+    const roofMat = mat(roofTints[Math.floor(rng() * roofTints.length)], { map: "roof", repeat: [along / 3, 2] });
 
     const verts: number[] = [];
     const uvs: number[] = [];
@@ -114,12 +128,22 @@ export function building(o: BuildingOpts): THREE.Group {
     roofG.add(cap);
   }
 
-  // door (front = +z)
+  // door (front = +z): door + lintel + stone steps + wall lantern
   if (o.door !== false) {
     const door = box(1.1, 2.2, 0.12, mat(PALETTE.woodDark, { map: "wood", repeat: [1, 2] }), 0, 1.1, o.d / 2 + 0.03);
     g.add(door);
     const lintel = box(1.5, 0.22, 0.2, mat(PALETTE.stone), 0, 2.35, o.d / 2 + 0.04);
     g.add(lintel);
+    const stepM = mat(0xffffff, { map: "stone", repeat: [1.4, 0.2] });
+    g.add(box(1.6, 0.14, 0.55, stepM, 0, 0.07, o.d / 2 + 0.3));
+    if (rng() < 0.6) g.add(box(1.3, 0.13, 0.35, stepM, 0, 0.2, o.d / 2 + 0.2));
+    // lantern bracket beside the door
+    const lantern = new THREE.Group();
+    lantern.add(box(0.06, 0.06, 0.24, mat(0x2a2723, { flat: true }), 0, 0, 0.1));
+    const lamp = box(0.14, 0.2, 0.14, mat(0xffe2a0, { emissive: 0xcf9d4a, emissiveIntensity: 0.9 }), 0, -0.12, 0.22);
+    lantern.add(lamp);
+    lantern.position.set(0.95, 2.15, o.d / 2);
+    g.add(lantern);
   }
 
   // chimney: straddles the ridge, offset along the LONG axis (clamped so it
@@ -150,9 +174,45 @@ export function building(o: BuildingOpts): THREE.Group {
       const wy = o.h * 0.62;
       const wgroup = new THREE.Group();
       wgroup.add(box(1.0, 1.3, 0.1, winMat, 0, 0, 0));
-      wgroup.add(box(0.34, 1.3, 0.06, shutterMat, -0.68, 0, 0.02));
-      wgroup.add(box(0.34, 1.3, 0.06, shutterMat, 0.68, 0, 0.02));
+      // shutters: closed / half / open per window
+      const state = rng();
+      if (state < 0.25) {
+        wgroup.add(box(0.5, 1.3, 0.06, shutterMat, -0.26, 0, 0.05));
+        wgroup.add(box(0.5, 1.3, 0.06, shutterMat, 0.26, 0, 0.05));
+      } else if (state < 0.5) {
+        wgroup.add(box(0.5, 1.3, 0.06, shutterMat, -0.26, 0, 0.05));
+        const openR = box(0.34, 1.3, 0.06, shutterMat, 0.75, 0, 0.1);
+        openR.rotation.y = 0.35;
+        wgroup.add(openR);
+      } else {
+        const openL = box(0.34, 1.3, 0.06, shutterMat, -0.75, 0, 0.1);
+        openL.rotation.y = -0.3;
+        wgroup.add(openL);
+        const openR = box(0.34, 1.3, 0.06, shutterMat, 0.75, 0, 0.1);
+        openR.rotation.y = 0.3;
+        wgroup.add(openR);
+      }
       wgroup.add(box(1.5, 0.14, 0.14, mat(PALETTE.stone), 0, -0.75, 0.02));
+      // window flower box
+      if (rng() < 0.4) {
+        wgroup.add(box(0.9, 0.16, 0.2, mat(0x8a5230, { map: "wood" }), 0, -0.72, 0.16));
+        const flowerCols = [0xc2554a, 0xd97a8e, 0xe8e0ce, 0xd9b23d];
+        for (let f = 0; f < 4; f++) {
+          const fl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.055, 0), mat(flowerCols[Math.floor(rng() * 4)], { flat: true }));
+          fl.position.set(-0.32 + f * 0.21, -0.58, 0.18);
+          wgroup.add(fl);
+        }
+      } else if (rng() < 0.3) {
+        // striped awning
+        const awn = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.85), (() => {
+          const m = mat(0xc3562b, { rough: 0.85 });
+          return m;
+        })());
+        awn.position.set(0, 0.85, 0.35);
+        awn.rotation.x = -Math.PI / 2 + 0.5;
+        awn.castShadow = true;
+        wgroup.add(awn);
+      }
       if (isX) {
         wgroup.position.set(sign * (o.w / 2 + 0.05), wy, off);
         wgroup.rotation.y = sign * Math.PI / 2;
@@ -194,6 +254,66 @@ export function archGate(width: number, height: number): THREE.Group {
   return g;
 }
 
+// ---------------------------------------------------------------------------
+// Recursive branching: the difference between "cones on a stick" and a tree.
+// Each branch is a short chain of tapered, slightly curved segments; leaves
+// (blob + wind-rustled cards) hang off the terminal twigs.
+// ---------------------------------------------------------------------------
+const UP = new THREE.Vector3(0, 1, 0);
+
+function growBranch(
+  g: THREE.Group, barkMat: THREE.Material, rng: () => number,
+  from: THREE.Vector3, dir: THREE.Vector3, len: number, r0: number, r1: number,
+  depth: number, spread: number, upBias: number,
+  leaf: (tip: THREE.Vector3) => void
+) {
+  let pos = from.clone();
+  let d = dir.clone().normalize();
+  const segs = 2 + (depth > 0 ? 1 : 0);
+  for (let i = 0; i < segs; i++) {
+    const t0 = i / segs, t1 = (i + 1) / segs;
+    const segLen = len / segs;
+    const ra = r0 + (r1 - r0) * t0, rb = r0 + (r1 - r0) * t1;
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(rb, ra, segLen * 1.06, 6), barkMat);
+    const mid = pos.clone().addScaledVector(d, segLen / 2);
+    seg.position.copy(mid);
+    seg.quaternion.setFromUnitVectors(UP, d);
+    seg.castShadow = true;
+    g.add(seg);
+    pos.addScaledVector(d, segLen);
+    // wander + upward pull
+    d.add(new THREE.Vector3((rng() - 0.5) * 0.5, upBias, (rng() - 0.5) * 0.5)).normalize();
+  }
+  if (depth <= 0) { leaf(pos); return; }
+  const kids = 2 + Math.floor(rng() * 2);
+  for (let k = 0; k < kids; k++) {
+    const a = rng() * Math.PI * 2;
+    const kd = d.clone()
+      .addScaledVector(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)), spread * (0.6 + rng() * 0.7))
+      .normalize();
+    growBranch(g, barkMat, rng, pos, kd, len * (0.55 + rng() * 0.2), r1, r1 * 0.5, depth - 1, spread, upBias, leaf);
+  }
+  if (rng() < 0.5) leaf(pos); // some foliage at forks too
+}
+
+function leafCluster(g: THREE.Group, rng: () => number, tones: THREE.Material[], cardTint: number, size: number) {
+  return (tip: THREE.Vector3) => {
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(size * (0.8 + rng() * 0.4), 0), tones[Math.floor(rng() * tones.length)]);
+    blob.position.copy(tip);
+    blob.scale.y = 0.75;
+    blob.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    blob.castShadow = true;
+    g.add(blob);
+    const cardM = leafMat(cardTint);
+    for (let i = 0; i < 2; i++) {
+      const card = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.9, size * 1.5), cardM);
+      card.position.copy(tip).add(new THREE.Vector3((rng() - 0.5) * size, (rng() - 0.4) * size * 0.8, (rng() - 0.5) * size));
+      card.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+      g.add(card);
+    }
+  };
+}
+
 export function cypress(h = 6, seed = 1): THREE.Group {
   const g = new THREE.Group();
   const rng = seededRandom(seed);
@@ -233,36 +353,21 @@ export function oliveTree(seed = 1): THREE.Group {
   const g = new THREE.Group();
   const rng = seededRandom(seed);
   const bark = mat(0x6b5744, { flat: true });
-  // gnarled trunk: two kinked segments + a low branch
-  const t1 = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.3, 1.0, 6), bark);
-  t1.position.y = 0.5;
-  t1.rotation.z = (rng() - 0.5) * 0.25;
-  t1.castShadow = true;
-  g.add(t1);
-  const t2 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.17, 0.9, 6), bark);
-  t2.position.set(t1.rotation.z * -0.9, 1.35, 0);
-  t2.rotation.z = (rng() - 0.5) * 0.5;
-  t2.castShadow = true;
-  g.add(t2);
-  const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.9, 5), bark);
-  branch.position.set(0.45, 1.5, 0.2);
-  branch.rotation.z = -1.0 + (rng() - 0.5) * 0.3;
-  g.add(branch);
-  // silvery two-tone canopy dome
-  const leafA = mat(0x7d8756, { flat: true });
-  const leafB = mat(0x93a06b, { flat: true });
-  const blobs = 6 + Math.floor(rng() * 3);
-  for (let i = 0; i < blobs; i++) {
-    const s = 0.55 + rng() * 0.55;
-    const a = rng() * Math.PI * 2;
-    const r = rng() * 1.3;
-    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), rng() < 0.5 ? leafA : leafB);
-    b.position.set(Math.cos(a) * r, 2.0 + rng() * 0.8 - r * 0.25, Math.sin(a) * r);
-    b.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    b.castShadow = true;
-    g.add(b);
+  const tones = [mat(0x7d8756, { flat: true }), mat(0x93a06b, { flat: true }), mat(0x869560, { flat: true })];
+  const leaf = leafCluster(g, rng, tones, 0x9aa877, 0.55 + rng() * 0.2);
+  // gnarled trunk splitting into 3-4 primaries, each branching twice
+  const trunkTop = new THREE.Vector3((rng() - 0.5) * 0.3, 1.0 + rng() * 0.4, (rng() - 0.5) * 0.3);
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.3, trunkTop.y * 1.05, 7), bark);
+  t.position.set(trunkTop.x / 2, trunkTop.y / 2, trunkTop.z / 2);
+  t.quaternion.setFromUnitVectors(UP, trunkTop.clone().normalize());
+  t.castShadow = true;
+  g.add(t);
+  const prims = 3 + Math.floor(rng() * 2);
+  for (let i = 0; i < prims; i++) {
+    const a = (i / prims) * Math.PI * 2 + rng() * 0.8;
+    const dir = new THREE.Vector3(Math.cos(a) * 0.8, 0.9 + rng() * 0.5, Math.sin(a) * 0.8).normalize();
+    growBranch(g, bark, rng, trunkTop, dir, 0.9 + rng() * 0.5, 0.11, 0.05, 1, 0.9, 0.12, leaf);
   }
-  leafHalo(g, rng, new THREE.Vector3(0, 2.3, 0), 1.5, 9, 0x9aa877, 1.3);
   return g;
 }
 
@@ -317,34 +422,169 @@ export function palmTree(seed = 1): THREE.Group {
 }
 
 /** Mediterranean umbrella pine: tall bare trunk, wide flat canopy */
+/** Mediterranean umbrella pine: tall bare trunk, branching flat crown */
 export function pineTree(seed = 1): THREE.Group {
   const g = new THREE.Group();
   const rng = seededRandom(seed);
-  const h = 5.5 + rng() * 2;
+  const h = 5 + rng() * 2.5;
   const bark = mat(0x7a5f47, { flat: true });
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.26, h, 6), bark);
-  trunk.position.y = h / 2;
-  trunk.rotation.z = (rng() - 0.5) * 0.12;
-  trunk.castShadow = true;
-  g.add(trunk);
-  const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 1.4, 5), bark);
-  limb.position.set(0.5, h - 0.7, 0.2);
-  limb.rotation.z = -1.1;
-  g.add(limb);
-  const leafA = mat(0x3f5a38, { flat: true });
-  const leafB = mat(0x4c6a40, { flat: true });
-  const blobs = 6 + Math.floor(rng() * 3);
-  for (let i = 0; i < blobs; i++) {
-    const a = rng() * Math.PI * 2;
-    const r = rng() * 1.9;
-    const s = 0.8 + rng() * 0.8;
-    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), rng() < 0.5 ? leafA : leafB);
-    b.scale.y = 0.35;
-    b.position.set(Math.cos(a) * r, h - 0.15 + rng() * 0.5 - r * 0.12, Math.sin(a) * r);
-    b.castShadow = true;
-    g.add(b);
+  const tones = [mat(0x3f5a38, { flat: true }), mat(0x4c6a40, { flat: true })];
+  const flatLeaf = (tip: THREE.Vector3) => {
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 + rng() * 0.5, 0), tones[Math.floor(rng() * 2)]);
+    blob.scale.y = 0.32;
+    blob.position.copy(tip);
+    blob.castShadow = true;
+    g.add(blob);
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.2), leafMat(0x6a8352));
+    card.position.copy(tip).setY(tip.y + 0.15);
+    card.rotation.set(-Math.PI / 2 + (rng() - 0.5) * 0.5, rng() * Math.PI, 0);
+    g.add(card);
+  };
+  // trunk: two slightly kinked segments
+  const kink = new THREE.Vector3((rng() - 0.5) * 0.5, h * 0.55, (rng() - 0.5) * 0.5);
+  const top = new THREE.Vector3(kink.x + (rng() - 0.5) * 0.7, h, kink.z + (rng() - 0.5) * 0.7);
+  const t1 = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.27, kink.length() * 1.03, 7), bark);
+  t1.position.copy(kink.clone().multiplyScalar(0.5));
+  t1.quaternion.setFromUnitVectors(UP, kink.clone().normalize());
+  t1.castShadow = true;
+  g.add(t1);
+  const up2 = top.clone().sub(kink);
+  const t2 = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, up2.length() * 1.03, 7), bark);
+  t2.position.copy(kink.clone().add(up2.clone().multiplyScalar(0.5)));
+  t2.quaternion.setFromUnitVectors(UP, up2.clone().normalize());
+  t2.castShadow = true;
+  g.add(t2);
+  // crown: 4-6 near-horizontal branches, each ending in flat foliage
+  const prims = 4 + Math.floor(rng() * 3);
+  for (let i = 0; i < prims; i++) {
+    const a = (i / prims) * Math.PI * 2 + rng() * 0.6;
+    const dir = new THREE.Vector3(Math.cos(a), 0.28 + rng() * 0.25, Math.sin(a)).normalize();
+    growBranch(g, bark, rng, top, dir, 1.1 + rng() * 0.6, 0.09, 0.04, 1, 0.7, -0.02, flatLeaf);
   }
-  leafHalo(g, rng, new THREE.Vector3(0, h + 0.1, 0), 2.1, 10, 0x6a8352, 1.5);
+  flatLeaf(top.clone().setY(top.y + 0.5));
+  return g;
+}
+
+/** small citrus tree, heavy with fruit — villa gardens */
+export function lemonTree(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const bark = mat(0x6f5a40, { flat: true });
+  const tones = [mat(0x3e5c33, { flat: true }), mat(0x4c6e3d, { flat: true })];
+  const fruit = mat(0xe8c93d, { emissive: 0x5c4d10, emissiveIntensity: 0.25, flat: true });
+  const leaf = (tip: THREE.Vector3) => {
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + rng() * 0.25, 0), tones[Math.floor(rng() * 2)]);
+    blob.position.copy(tip);
+    blob.castShadow = true;
+    g.add(blob);
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.75), leafMat(0x5f7d43));
+    card.position.copy(tip);
+    card.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+    g.add(card);
+    for (let i = 0; i < 2 + Math.floor(rng() * 2); i++) {
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.065, 6, 5), fruit);
+      const fa = rng() * Math.PI * 2;
+      f.position.copy(tip).add(new THREE.Vector3(Math.cos(fa) * 0.45, -0.25 + rng() * 0.4, Math.sin(fa) * 0.45));
+      g.add(f);
+    }
+  };
+  const trunkTop = new THREE.Vector3(0, 0.7 + rng() * 0.2, 0);
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, trunkTop.y, 6), bark);
+  t.position.y = trunkTop.y / 2;
+  t.castShadow = true;
+  g.add(t);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + rng();
+    const dir = new THREE.Vector3(Math.cos(a) * 0.7, 1, Math.sin(a) * 0.7).normalize();
+    growBranch(g, bark, rng, trunkTop, dir, 0.55 + rng() * 0.25, 0.055, 0.03, 0, 0.7, 0.1, leaf);
+  }
+  return g;
+}
+
+/** agave rosette: ring of thick curved spikes — sculptural roadside green */
+export function agave(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const tones = [mat(0x6e8f7c, { flat: true }), mat(0x7fa08a, { flat: true })];
+  const n = 11 + Math.floor(rng() * 6);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + rng() * 0.3;
+    const tilt = 0.5 + rng() * 0.55; // outward lean
+    const len = 0.7 + rng() * 0.5;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09 + rng() * 0.04, len, 4), tones[i % 2]);
+    spike.scale.z = 0.45; // blade-flat
+    const dir = new THREE.Vector3(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt));
+    spike.position.copy(dir.clone().multiplyScalar(len * 0.4)).setY(dir.y * len * 0.42 + 0.05);
+    spike.quaternion.setFromUnitVectors(UP, dir);
+    spike.rotation.y += a;
+    spike.castShadow = true;
+    g.add(spike);
+  }
+  return g;
+}
+
+/** prickly pear cactus: branching flat pads with fruit */
+export function pricklyPear(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const padM = mat(0x5e7d47, { flat: true });
+  const fruitM = mat(0xb54a3c, { flat: true });
+  const addPad = (base: THREE.Vector3, a: number, tilt: number, s: number, depth: number) => {
+    const pad = new THREE.Mesh(new THREE.SphereGeometry(0.32 * s, 8, 6), padM);
+    pad.scale.set(1, 1.35, 0.28);
+    const dir = new THREE.Vector3(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt));
+    const center = base.clone().addScaledVector(dir, 0.4 * s);
+    pad.position.copy(center);
+    pad.rotation.y = -a + Math.PI / 2;
+    pad.rotation.z = (rng() - 0.5) * 0.3;
+    pad.castShadow = true;
+    g.add(pad);
+    if (rng() < 0.5) {
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), fruitM);
+      f.position.copy(center).add(new THREE.Vector3(0, 0.42 * s, 0));
+      g.add(f);
+    }
+    if (depth > 0) {
+      const kids = 1 + Math.floor(rng() * 2);
+      for (let k = 0; k < kids; k++) {
+        addPad(center.clone().add(new THREE.Vector3(0, 0.3 * s, 0)), a + (rng() - 0.5) * 1.6, 0.5 + rng() * 0.5, s * 0.8, depth - 1);
+      }
+    }
+  };
+  const stems = 2 + Math.floor(rng() * 2);
+  for (let i = 0; i < stems; i++) {
+    addPad(new THREE.Vector3((rng() - 0.5) * 0.3, 0, (rng() - 0.5) * 0.3), rng() * Math.PI * 2, 0.25 + rng() * 0.3, 1, 2);
+  }
+  return g;
+}
+
+/** oleander: arcing bush with flower clusters */
+export function oleander(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const leafM = mat(0x4c6a44, { flat: true });
+  const flowerM = mat(rng() < 0.5 ? 0xd97a8e : 0xe8e0ce, { flat: true });
+  const stems = 6 + Math.floor(rng() * 4);
+  for (let i = 0; i < stems; i++) {
+    const a = rng() * Math.PI * 2;
+    const dir = new THREE.Vector3(Math.cos(a) * 0.55, 1, Math.sin(a) * 0.55).normalize();
+    const len = 0.9 + rng() * 0.5;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, len, 5), mat(0x5d6b4a, { flat: true }));
+    const mid = dir.clone().multiplyScalar(len / 2);
+    stem.position.copy(mid);
+    stem.quaternion.setFromUnitVectors(UP, dir);
+    g.add(stem);
+    const tip = dir.clone().multiplyScalar(len);
+    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3 + rng() * 0.15, 0), leafM);
+    foliage.position.copy(tip);
+    foliage.castShadow = true;
+    g.add(foliage);
+    if (rng() < 0.75) {
+      const fl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12 + rng() * 0.06, 0), flowerM);
+      fl.position.copy(tip).add(new THREE.Vector3((rng() - 0.5) * 0.3, 0.22, (rng() - 0.5) * 0.3));
+      g.add(fl);
+    }
+  }
   return g;
 }
 
@@ -1229,6 +1469,124 @@ export function seagullPost(seed = 1): THREE.Group {
   g.add(wing);
   g.rotation.y = seededRandom(seed + 3)() * Math.PI * 2;
   void rng;
+  return g;
+}
+
+/** pastel 60s scooter — the Riviera on two wheels */
+export function vespa(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const colors = [0x9fd4c5, 0xe8e0ce, 0xc2554a, 0x8fb3d9];
+  const bodyM = mat(colors[Math.floor(rng() * colors.length)], { rough: 0.35 });
+  const darkM = mat(0x2a2723, { flat: true });
+  // rear body: squashed sphere over the back wheel
+  const rear = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 7), bodyM);
+  rear.scale.set(0.72, 0.78, 1.1);
+  rear.position.set(0, 0.5, -0.35);
+  rear.castShadow = true;
+  g.add(rear);
+  // floorboard + front shield
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.55), bodyM);
+  board.position.set(0, 0.28, 0.15);
+  g.add(board);
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.62, 0.05), bodyM);
+  shield.position.set(0, 0.6, 0.48);
+  shield.rotation.x = -0.15;
+  shield.castShadow = true;
+  g.add(shield);
+  // seat, handlebar, headlight
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.1, 0.45), darkM);
+  seat.position.set(0, 0.78, -0.28);
+  g.add(seat);
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.42, 6), darkM);
+  bar.rotation.z = Math.PI / 2;
+  bar.position.set(0, 0.95, 0.45);
+  g.add(bar);
+  const light = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), mat(0xfff2c0, { emissive: 0x776a3a, emissiveIntensity: 0.5 }));
+  light.position.set(0, 0.88, 0.52);
+  g.add(light);
+  for (const zz of [0.45, -0.42]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.09, 10), darkM);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(0, 0.17, zz);
+    wheel.castShadow = true;
+    g.add(wheel);
+  }
+  // kickstand lean
+  g.rotation.z = 0.08;
+  return g;
+}
+
+/** café table with two chairs */
+export function cafeSet(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const metal = mat(0x3d4a52, { rough: 0.4 });
+  const topM = mat(0xe8e0ce, { rough: 0.5 });
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.04, 12), topM);
+  top.position.y = 0.72;
+  top.castShadow = true;
+  g.add(top);
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.7, 6), metal);
+  leg.position.y = 0.36;
+  g.add(leg);
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.04, 10), metal);
+  foot.position.y = 0.02;
+  g.add(foot);
+  // a bottle and glasses
+  const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.24, 7), mat(0x2e5a3a, { rough: 0.15 }));
+  bottle.position.set(0.1, 0.86, 0.05);
+  g.add(bottle);
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.08, 7), mat(0xcfd8dc, { rough: 0.1 }));
+  glass.position.set(-0.12, 0.78, -0.06);
+  g.add(glass);
+  for (const s of [-1, 1]) {
+    const a = s * (0.8 + rng() * 0.5);
+    const cx = Math.cos(a) * 0.75, cz = Math.sin(a) * 0.75;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.38), topM);
+    seat.position.set(cx, 0.45, cz);
+    seat.castShadow = true;
+    g.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.4, 0.04), metal);
+    back.position.set(cx * 1.25, 0.68, cz * 1.25);
+    back.lookAt(0, 0.68, 0);
+    g.add(back);
+    for (const [lx, lz] of [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]]) {
+      const cl = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.45, 5), metal);
+      cl.position.set(cx + lx, 0.22, cz + lz);
+      g.add(cl);
+    }
+  }
+  return g;
+}
+
+/** stacked fruit crates bursting with produce */
+export function fruitCrates(seed = 1): THREE.Group {
+  const g = new THREE.Group();
+  const rng = seededRandom(seed);
+  const wood = mat(0xffffff, { map: "wood" });
+  const produce = [0xe0862f, 0xe8c93d, 0xc2554a, 0x7f9457];
+  let y = 0;
+  const n = 2 + Math.floor(rng() * 2);
+  for (let i = 0; i < n; i++) {
+    const cw = 0.72, ch = 0.3;
+    const crateBox = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, 0.5), wood);
+    crateBox.position.set((rng() - 0.5) * 0.12, y + ch / 2, (rng() - 0.5) * 0.12);
+    crateBox.rotation.y = (rng() - 0.5) * 0.3;
+    crateBox.castShadow = true;
+    g.add(crateBox);
+    const color = produce[Math.floor(rng() * produce.length)];
+    for (let f = 0; f < 6; f++) {
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.055 + rng() * 0.02, 6, 5), mat(color, { flat: true }));
+      fruit.position.set(
+        crateBox.position.x + (rng() - 0.5) * (cw - 0.2),
+        y + ch + 0.03,
+        crateBox.position.z + (rng() - 0.5) * 0.32
+      );
+      g.add(fruit);
+    }
+    y += ch + 0.1;
+  }
   return g;
 }
 

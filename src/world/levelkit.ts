@@ -39,8 +39,8 @@ export type Item =
   | { kind: "vineyard"; x1: number; z1: number; x2: number; z2: number }
   | { kind: "arch"; x: number; z: number; rot?: number; w?: number; h?: number }
   | { kind: "tower"; x: number; z: number; h?: number }
-  | { kind: "cypress" | "olive" | "palm" | "bush" | "pine"; x: number; z: number; seed?: number }
-  | { kind: "amphora" | "bench" | "cart" | "firewood" | "netrack" | "basket" | "ropecoil" | "stall" | "shrine" | "pole" | "seagull"; x: number; z: number; rot?: number; seed?: number }
+  | { kind: "cypress" | "olive" | "palm" | "bush" | "pine" | "lemon" | "agave" | "prickly" | "oleander"; x: number; z: number; seed?: number }
+  | { kind: "amphora" | "bench" | "cart" | "firewood" | "netrack" | "basket" | "ropecoil" | "stall" | "shrine" | "pole" | "seagull" | "vespa" | "cafeset" | "fruitcrates"; x: number; z: number; rot?: number; seed?: number }
   | { kind: "fence"; x1: number; z1: number; x2: number; z2: number }
   | { kind: "rocks"; x: number; z: number; seed?: number; scale?: number }
   | { kind: "grass"; x: number; z: number; r?: number; seed?: number }
@@ -121,6 +121,13 @@ function itemGroup(item: Item): THREE.Group {
     case "olive": return P.oliveTree(item.seed ?? 1);
     case "palm": return P.palmTree(item.seed ?? 1);
     case "pine": return P.pineTree(item.seed ?? 1);
+    case "lemon": return P.lemonTree(item.seed ?? ((item.x * 7 + item.z) | 0));
+    case "agave": return P.agave(item.seed ?? ((item.x + item.z * 3) | 0));
+    case "prickly": return P.pricklyPear(item.seed ?? ((item.x * 5 + item.z) | 0));
+    case "oleander": return P.oleander(item.seed ?? ((item.x + item.z * 9) | 0));
+    case "vespa": return P.vespa(item.seed ?? ((item.x * 3 + item.z) | 0));
+    case "cafeset": return P.cafeSet(item.seed ?? 1);
+    case "fruitcrates": return P.fruitCrates(item.seed ?? ((item.x + item.z * 7) | 0));
     case "bush": return P.bush(item.seed ?? 1);
     case "amphora": return P.amphora(item.seed ?? ((item.x * 13 + item.z * 7) | 0));
     case "bench": return P.bench();
@@ -246,6 +253,13 @@ function itemColliders(item: Item): BoxCollider[] {
     case "olive": c.push(makeBox(item.x, item.z, 0.55, 0.55, 1.0)); break;
     case "palm": c.push(makeBox(item.x, item.z, 0.45, 0.45, 1.0)); break;
     case "pine": c.push(makeBox(item.x, item.z, 0.55, 0.55, 1.0)); break;
+    case "lemon": c.push(makeBox(item.x, item.z, 0.5, 0.5, 0.9)); break;
+    case "agave": c.push(makeBox(item.x, item.z, 0.9, 0.9, 0.6)); break;
+    case "prickly": c.push(makeBox(item.x, item.z, 1.0, 1.0, 0.8)); break;
+    case "oleander": break; // soft bush, walk-through
+    case "vespa": c.push(makeBox(item.x, item.z, 0.6, 1.1, 0.8)); break;
+    case "cafeset": c.push(makeBox(item.x, item.z, 0.9, 0.9, 0.75)); break;
+    case "fruitcrates": c.push(makeBox(item.x, item.z, 0.85, 0.65, 0.7)); break;
     case "amphora": c.push(makeBox(item.x, item.z, 0.8, 0.8, 0.8)); break;
     case "bench": c.push(makeBox(item.x, item.z, 1.5, 0.5, 0.6)); break;
     case "cart": c.push(makeBox(item.x, item.z, 1.3, 1.9, 0.9)); break;
