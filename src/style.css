@@ -282,6 +282,15 @@ html, body {
   font-size: 11px; letter-spacing: 0.5em; color: #7fd4cf; text-transform: uppercase;
 }
 
+/* minimap */
+.hud-minimap {
+  position: absolute; top: 22px; right: 24px;
+  width: 180px; height: 180px;
+  background: rgba(10, 12, 11, 0.6);
+  border: 1px solid rgba(217, 164, 65, 0.45);
+  border-radius: 2px;
+}
+
 /* guard bark subtitles */
 .hud-subtitle {
   position: absolute; left: 50%; bottom: 11%; transform: translateX(-50%);

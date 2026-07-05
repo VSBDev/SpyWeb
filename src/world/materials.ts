@@ -303,7 +303,10 @@ function windMaterial(kind: "grass" | "leaf", tint: number, ampX: number, ampZ: 
   const m = new THREE.MeshStandardMaterial({
     map: kind === "grass" ? grassBladeTexture() : leafCardTexture(),
     color: tint,
-    alphaTest: 0.35,
+    // leaves clip hard: mipmaps of the radial leaf texture average to ~0.4
+    // alpha at distance, and a lower threshold renders whole cards as
+    // ghostly discs around the canopy
+    alphaTest: kind === "leaf" ? 0.55 : 0.35,
     side: THREE.DoubleSide,
     roughness: 0.92,
   });

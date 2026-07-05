@@ -148,6 +148,7 @@ export class Mission {
   checkpoint: Checkpoint | null = null;
   private takenPickups: string[] = [];
   private smokes: SmokeCloud[] = [];
+  private fillLight: THREE.PointLight | null = null;
   private decoys: Decoy[] = [];
   private empPulses: EmpPulse[] = [];
   private cams: CamState[] = [];
@@ -174,8 +175,13 @@ export class Mission {
     this.level = buildLevel(def);
     this.scene.add(this.level.group);
     this.scene.background = new THREE.Color(this.level.skyColor);
-    const fogColor = def.time === "night" ? 0x101a2c : def.time === "dusk" ? 0xd9a878 : 0xdcd2b8;
-    this.scene.fog = new THREE.FogExp2(fogColor, def.time === "night" ? 0.0085 : 0.0038);
+    const fogColor = def.underground ? 0x04060a : def.time === "night" ? 0x101a2c : def.time === "dusk" ? 0xd9a878 : 0xdcd2b8;
+    this.scene.fog = new THREE.FogExp2(fogColor, def.underground ? 0.018 : def.time === "night" ? 0.0085 : 0.0038);
+    if (def.underground) {
+      // soft carried-lantern fill so the player is always readable underground
+      this.fillLight = new THREE.PointLight(0xffe2b8, 2.4, 7, 1.6);
+      this.scene.add(this.fillLight);
+    }
 
     // shadow frustum follows the player (set bounds once)
     const sc = this.level.sun.shadow.camera;
@@ -327,6 +333,8 @@ export class Mission {
       center.z + (def.playerStart.z - center.z) * 0.3
     );
     this.hud.setLetterbox(true);
+
+    this.hud.initMinimap(this.level.colliders, def.bounds);
 
     audio.setAmbience(def.ambience);
     audio.setMusicState("calm");
@@ -1335,6 +1343,15 @@ export class Mission {
       });
     }
     this.hud.setDetectionTicks(ticks);
+
+    // ---- minimap ----
+    if (this.fillLight) this.fillLight.position.set(p.pos.x, 2.1, p.pos.z);
+    this.hud.drawMinimap(
+      p.pos.x, p.pos.z, p.yaw,
+      this.guards.map((g) => ({ x: g.pos.x, z: g.pos.z, state: g.state, dead: g.dead })),
+      this.objectives.states.filter((s) => s.def.killGuard === undefined).map((s) => ({ x: s.def.x, z: s.def.z, done: s.done })),
+      { x: this.level.def.exfil.x, z: this.level.def.exfil.z, active: this.objectives.exfilActive }
+    );
 
     // ---- objectives / exfil ----
     // kill-target objectives complete when their guard goes down

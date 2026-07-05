@@ -28,6 +28,7 @@ export class HUD {
     this.el.innerHTML = `
       <div class="hud-objectives"><div class="obj-title">Objectives</div><div class="obj-list"></div></div>
       <div class="hud-alert calm"></div>
+      <canvas class="hud-minimap" width="180" height="180"></canvas>
       <div class="hud-bottom-left">
         <div class="hud-health"></div>
         <div class="hud-gear"></div>
@@ -174,6 +175,99 @@ export class HUD {
       this.ringVisible = true;
     }
     this.ringFillEl!.style.background = `conic-gradient(var(--gold) ${Math.floor(p * 360)}deg, rgba(242,232,213,0.15) 0deg)`;
+  }
+
+  // ---- minimap ----
+  private mmStatic: HTMLCanvasElement | null = null;
+  private mmScale = 2.5;                 // px per metre
+  private mmBounds = { minX: 0, minZ: 0 };
+  private mmCanvas: HTMLCanvasElement | null = null;
+
+  /** prerender the static wall layer once per mission */
+  initMinimap(colliders: { minX: number; maxX: number; minZ: number; maxZ: number; height: number; solid: boolean }[], bounds: { minX: number; minZ: number; maxX: number; maxZ: number }) {
+    this.mmCanvas = this.el.querySelector(".hud-minimap") as HTMLCanvasElement;
+    this.mmBounds = { minX: bounds.minX, minZ: bounds.minZ };
+    const w = Math.ceil((bounds.maxX - bounds.minX) * this.mmScale);
+    const h = Math.ceil((bounds.maxZ - bounds.minZ) * this.mmScale);
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "rgba(18, 22, 21, 0.9)";
+    ctx.fillRect(0, 0, w, h);
+    for (const col of colliders) {
+      if (!col.solid) continue;
+      ctx.fillStyle = col.height >= 1.5 ? "rgba(196, 188, 165, 0.85)" : "rgba(120, 116, 100, 0.5)";
+      ctx.fillRect(
+        (col.minX - bounds.minX) * this.mmScale,
+        (col.minZ - bounds.minZ) * this.mmScale,
+        Math.max(1.5, (col.maxX - col.minX) * this.mmScale),
+        Math.max(1.5, (col.maxZ - col.minZ) * this.mmScale)
+      );
+    }
+    this.mmStatic = c;
+  }
+
+  /** per-frame dynamic layer: player, guards by state, objectives, exfil */
+  drawMinimap(
+    px: number, pz: number, pyaw: number,
+    guards: { x: number; z: number; state: string; dead: boolean }[],
+    objectives: { x: number; z: number; done: boolean }[],
+    exfil: { x: number; z: number; active: boolean }
+  ) {
+    if (!this.mmCanvas || !this.mmStatic) return;
+    const ctx = this.mmCanvas.getContext("2d")!;
+    const S = 180, half = S / 2, sc = this.mmScale;
+    ctx.clearRect(0, 0, S, S);
+    // static layer centred on the player
+    const ox = (px - this.mmBounds.minX) * sc - half;
+    const oz = (pz - this.mmBounds.minZ) * sc - half;
+    ctx.drawImage(this.mmStatic, -ox, -oz);
+    const toMap = (x: number, z: number): [number, number] =>
+      [(x - this.mmBounds.minX) * sc - ox, (z - this.mmBounds.minZ) * sc - oz];
+    // objectives
+    for (const o of objectives) {
+      if (o.done) continue;
+      const [mx, mz] = toMap(o.x, o.z);
+      ctx.save();
+      ctx.translate(mx, mz);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "#d9a441";
+      ctx.fillRect(-3, -3, 6, 6);
+      ctx.restore();
+    }
+    // exfil
+    if (exfil.active) {
+      const [mx, mz] = toMap(exfil.x, exfil.z);
+      ctx.strokeStyle = "#d9a441";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mx, mz, 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // guards
+    for (const g of guards) {
+      if (g.dead) continue;
+      const [mx, mz] = toMap(g.x, g.z);
+      if (mx < -4 || mx > S + 4 || mz < -4 || mz > S + 4) continue;
+      ctx.fillStyle = g.state === "combat" || g.state === "alarm-run" ? "#ff5c44"
+        : g.state === "search" || g.state === "investigate" || g.state === "suspicious" ? "#ffc24f"
+        : "#4fd8c8";
+      ctx.beginPath();
+      ctx.arc(mx, mz, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // player arrow (character yaw: forward = (sin, cos) in world XZ)
+    ctx.save();
+    ctx.translate(half, half);
+    ctx.rotate(Math.atan2(Math.sin(pyaw), Math.cos(pyaw)) * -1 + Math.PI);
+    ctx.fillStyle = "#f6efdf";
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4.5, 5);
+    ctx.lineTo(-4.5, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   setReflex(on: boolean) {

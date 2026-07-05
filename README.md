@@ -9,8 +9,9 @@ and sound is generated procedurally in code — there are no asset files.
 
 You are **Agent MIRA**, sent to unravel the Serpe syndicate's web across the Riviera:
 a training cove, a paymaster's villa, a smuggler's harbor at dusk, a moonlit monastery
-listening post, the fortress at the heart of it all — and one final blacked-out night
-to cut the head off the snake.
+listening post, the fortress at the heart of it all, one blacked-out night to cut the
+head off the snake — and a descent into LA CRIPTA, a procedurally generated underground
+archive vault of galleries, brazier-lit vaults, and patrolled tunnels.
 
 ## Run it
 
@@ -65,6 +66,8 @@ B crouch, X drag, Y stone, LB recon, RB cover, D-pad gadgets, Start pause.
   breaker and mobile hiding spot), decoy beacons (a beeping lure that drags guards
   across the map), and EMP charges (14 seconds of dead electronics). Later
   operations carry more.
+- **Minimap** — a live tactical minimap tracks walls, objectives, the exfil point,
+  and every guard's alert state at a glance.
 - **Ranking** — GHOST (no kills, never seen, no alarms) → PHANTOM → PRO → OPERATIVE →
   LOUD & ALIVE. Best ranks and times are saved locally; missions unlock in sequence.
 

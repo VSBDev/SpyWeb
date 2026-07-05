@@ -1,4 +1,5 @@
 import type { LevelDef } from "../world/levelkit";
+import { generateDungeon } from "./dungeon";
 
 /**
  * All six missions. Angle convention: forward = (sin a, cos a),
@@ -146,7 +147,7 @@ const villa: LevelDef = {
     { kind: "arch", x: 0, z: 38, w: 4, h: 3.6 },
     { kind: "wall", x1: -45, z1: -38, x2: -34, z2: -38, h: 2.8 },
     { kind: "wall", x1: -26, z1: -38, x2: 45, z2: -38, h: 2.8 },
-    { kind: "arch", x: -30, z: -38, w: 4, h: 3.4 },
+    { kind: "arch", x: -30, z: -38, w: 6, h: 3.4 },
     { kind: "wall", x1: -45, z1: -38, x2: -45, z2: 38, h: 2.8 },
     { kind: "wall", x1: 45, z1: -38, x2: 45, z2: 38, h: 2.8 },
     // buildings
@@ -1001,5 +1002,35 @@ const gauntlet: LevelDef = {
     `Vasari is dead. Pietro is aboard, asking if London pays pensions. The negatives are in the sea, where they will keep their secrets better than we ever did.\n\nThe web is cut, MIRA — every thread, both ends. Come home. The Riviera is just the sea again. — ANCHOR`,
 };
 
-export const LEVELS: LevelDef[] = [tutorial, villa, harbor, monastery, fortress, gauntlet];
+// ============================================================================
+// OP 06 — La Cripta (generated underground archive beneath San Luca)
+// ============================================================================
+const cryptGen = generateDungeon(1963);
+const crypt: LevelDef = {
+  id: "crypt",
+  name: "LA CRIPTA",
+  tag: "OP 06",
+  cardBlurb:
+    "Beneath San Luca the brothers dug crypts. Serpe dug deeper — the paper archive is still down there.",
+  briefing:
+    `One more thread, MIRA — under the ground this time.\n\nThe negatives are sea-bed, but paper burns slow: beneath the monastery of San Luca, in the old crypts, Serpe kept its working archive — carbon copies, courier schedules, the Tailor's correspondence. Enough to rebuild the web in five years if anyone ambitious finds it.\n\nThe survivors sealed themselves in with it. Three cache rooms, deep in the tunnel line. Burn all three. The monks' escape grotto at the far end comes out below the cliffs — our boat will be there.\n\nNo sky down there, no sun, no second exits. Lamplight and long corridors. You have never been better suited to a place in your life. — ANCHOR`,
+  time: "night",
+  ambience: "none",
+  underground: true,
+  bounds: cryptGen.bounds,
+  playerStart: cryptGen.playerStart,
+  ammo: 12,
+  stones: 6,
+  gear: { smoke: 3, decoys: 3, emp: 2 },
+  items: cryptGen.items,
+  guards: cryptGen.guards,
+  objectives: cryptGen.objectives,
+  exfil: cryptGen.exfil,
+  hint:
+    "Long corridors carry sound. The minimap remembers the tunnels for you.",
+  epilogue:
+    `Smoke is still rising out of the cliff vents. The archive is ash, the crypts are quiet, and the last men who knew the Tailor's filing system are swimming to Marseille.\n\nThat is the end of it, MIRA — every copy, every thread, both ends and the middle. The Service owes you a beach, and I intend to see you use it. — ANCHOR`,
+};
+
+export const LEVELS: LevelDef[] = [tutorial, villa, harbor, monastery, fortress, gauntlet, crypt];
 export const LEVEL_ORDER = LEVELS.map((l) => l.id);

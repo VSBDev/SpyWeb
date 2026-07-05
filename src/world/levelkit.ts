@@ -44,12 +44,13 @@ export type Item =
   | { kind: "fence"; x1: number; z1: number; x2: number; z2: number }
   | { kind: "rocks"; x: number; z: number; seed?: number; scale?: number }
   | { kind: "grass"; x: number; z: number; r?: number; seed?: number }
-  | { kind: "crate" | "crates" | "barrel" | "sandbags" | "fountain" | "statue" | "truck" | "boat" | "pergola" | "lamp" | "mast" | "alarm" | "searchlight" | "crane" | "banner"; x: number; z: number; rot?: number }
+  | { kind: "crate" | "crates" | "barrel" | "sandbags" | "fountain" | "statue" | "truck" | "boat" | "pergola" | "lamp" | "mast" | "alarm" | "searchlight" | "crane" | "banner"; x: number; z: number; rot?: number; dim?: boolean }
   | { kind: "laundry" | "colonnade"; x: number; z: number; rot?: number; length?: number }
   | { kind: "pickup"; x: number; z: number; what: "ammo" | "stones"; amount?: number }
   | { kind: "cam"; x: number; z: number; rot: number; sweep?: number }
   | { kind: "house"; x: number; z: number; w: number; d: number; door: "N" | "S" | "E" | "W"; seed?: number; color?: number }
   | { kind: "well"; x: number; z: number }
+  | { kind: "block"; x: number; z: number; w: number; d: number; h: number }
   | { kind: "sweeper"; x: number; z: number; height?: number; radius?: number; speed?: number }
   | { kind: "dock"; x: number; z: number; rot?: number; length?: number; width?: number };
 
@@ -76,6 +77,7 @@ export interface LevelDef {
   guards: GuardDef[];
   objectives: ObjectiveDef[];
   exfil: { x: number; z: number; r: number; label: string };
+  underground?: boolean;      // bunker rendering: ceiling, no sky/terrain
   hint?: string;              // shown at mission start
   epilogue?: string;          // shown on the debrief screen — carries the story forward
 }
@@ -120,6 +122,17 @@ function itemGroup(item: Item): THREE.Group {
     case "cypress": return P.cypress(5 + ((item.seed ?? 1) % 3), item.seed ?? 1);
     case "olive": return P.oliveTree(item.seed ?? 1);
     case "palm": return P.palmTree(item.seed ?? 1);
+    case "block": {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(item.w, item.h, item.d),
+        mat(0x8d8574, { map: "stone", repeat: [Math.max(1, item.w / 2.4), Math.max(1, item.h / 2.4)] })
+      );
+      m.position.y = item.h / 2;
+      m.castShadow = true; m.receiveShadow = true;
+      g.add(m);
+      return g;
+    }
     case "pine": return P.pineTree(item.seed ?? 1);
     case "lemon": return P.lemonTree(item.seed ?? ((item.x * 7 + item.z) | 0));
     case "agave": return P.agave(item.seed ?? ((item.x + item.z * 3) | 0));
@@ -252,6 +265,7 @@ function itemColliders(item: Item): BoxCollider[] {
     case "cypress": c.push(makeBox(item.x, item.z, 1.1, 1.1, 5)); break;
     case "olive": c.push(makeBox(item.x, item.z, 0.55, 0.55, 1.0)); break;
     case "palm": c.push(makeBox(item.x, item.z, 0.45, 0.45, 1.0)); break;
+    case "block": c.push(makeBox(item.x, item.z, item.w, item.d, item.h)); break;
     case "pine": c.push(makeBox(item.x, item.z, 0.55, 0.55, 1.0)); break;
     case "lemon": c.push(makeBox(item.x, item.z, 0.5, 0.5, 0.9)); break;
     case "agave": c.push(makeBox(item.x, item.z, 0.9, 0.9, 0.6)); break;
@@ -292,7 +306,7 @@ function itemColliders(item: Item): BoxCollider[] {
     }
     case "boat": c.push(makeBox(item.x, item.z, 2.4, 7.4, 1.6)); break;
     case "pergola": break; // walk under
-    case "lamp": c.push(makeBox(item.x, item.z, 0.3, 0.3, 1.0)); break;
+    case "lamp": c.push({ ...makeBox(item.x, item.z, 0.3, 0.3, 1.0), noNav: true }); break;
     case "mast": c.push(makeBox(item.x, item.z, 1.5, 1.5, 1.2)); break;
     case "alarm": break;
     case "searchlight": c.push(makeBox(item.x, item.z, 0.9, 0.9, 1.0)); break;
@@ -488,11 +502,11 @@ function buildHouse(it: Extract<Item, { kind: "house" }>, night: boolean): { gro
   const roof = new THREE.Group();
   // NOTE ×√2: a 4-sided cone rotated 45° has axis half-extent radius/√2,
   // so the radius must be the half-DIAGONAL to cover the walls
-  const cone = new THREE.Mesh(
-    new THREE.ConeGeometry((Math.max(it.w, it.d) / 2 + 0.55) * Math.SQRT2, 1.6, 4),
-    mat(PALETTE.terracotta, { flat: true })
-  );
-  cone.rotation.y = Math.PI / 4;
+  const coneGeo = new THREE.ConeGeometry((Math.max(it.w, it.d) / 2 + 0.55) * Math.SQRT2, 1.6, 4);
+  coneGeo.rotateY(Math.PI / 4); // bake the 45° in the GEOMETRY so mesh scale stays axis-aligned
+  const coneM = mat(PALETTE.terracotta, { flat: true }).clone();
+  coneM.side = THREE.DoubleSide;
+  const cone = new THREE.Mesh(coneGeo, coneM);
   cone.scale.set(it.w / Math.max(it.w, it.d), 1, it.d / Math.max(it.w, it.d));
   cone.position.y = HOUSE_H + 0.8;
   cone.castShadow = true;
@@ -550,6 +564,27 @@ export function buildLevel(def: LevelDef): LevelRuntime {
   const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
   const night = def.time === "night";
 
+  if (def.underground) {
+    // ---- bunker shell: stone floor + a ceiling that only renders from below,
+    // so the third-person camera gets a dollhouse view into the tunnels ----
+    const floorM = new THREE.MeshStandardMaterial({ map: texture("stone").clone(), color: 0x6d675c, roughness: 0.96 });
+    floorM.map!.repeat.set(W / 3, D / 3);
+    floorM.map!.needsUpdate = true;
+    floorM.bumpMap = floorM.map;
+    floorM.bumpScale = 0.02;
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W + 30, D + 30), floorM);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(cx, 0, cz);
+    floor.receiveShadow = true;
+    group.add(floor);
+    const ceilM = new THREE.MeshStandardMaterial({ map: texture("concrete").clone(), color: 0x4a463e, roughness: 0.95 });
+    ceilM.map!.repeat.set(W / 5, D / 5);
+    ceilM.map!.needsUpdate = true;
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W + 30, D + 30), ceilM);
+    ceiling.rotation.x = Math.PI / 2; // faces DOWN: invisible from above
+    ceiling.position.set(cx, 3.25, cz);
+    group.add(ceiling);
+  } else {
   // ---- terrain: flat inside the playable bounds, hills & sea basin beyond ----
   const tSeed = def.id.length * 977 + def.id.charCodeAt(0) * 13;
   const inRectT = (x: number, z: number, r: RectDef) => x > r.minX && x < r.maxX && z > r.minZ && z < r.maxZ;
@@ -673,6 +708,8 @@ export function buildLevel(def: LevelDef): LevelRuntime {
   for (const r of def.paths ?? []) addDecal(r, "gravel", 0.02);
   for (const r of def.plazas ?? []) addDecal(r, "concrete", 0.025, night ? 0x9aa2b2 : 0xd8cfbc);
 
+  } // end overground terrain/sky
+
   // ---- water ----
   for (const r of def.water ?? []) {
     const wMat = new THREE.MeshStandardMaterial({
@@ -743,7 +780,13 @@ export function buildLevel(def: LevelDef): LevelRuntime {
       const g = itemGroup(item);
       g.position.set(item.x, 0, item.z);
       if ("rot" in item && item.rot) g.rotation.y = item.rot;
-      if (item.kind === "lamp" && night) {
+      if (item.kind === "lamp" && def.underground) {
+        // 3.7m lamp posts poke through the 3.25m bunker ceiling — burn braziers
+        // instead. dim:true = emissive flame only, no PointLight (keeps the
+        // forward-renderer light count sane on long galleries)
+        g.clear();
+        g.add(P.brazier(!("dim" in item && item.dim)));
+      } else if (item.kind === "lamp" && night) {
         // replace with lit version
         g.clear();
         const lit = P.lampPost(true);
@@ -787,7 +830,7 @@ export function buildLevel(def: LevelDef): LevelRuntime {
 
   // ---- auto-scattered ground cover: tufts, pebbles, wildflowers ----
   // decorative only (no colliders) so navigation and stealth are untouched
-  {
+  if (!def.underground) {
     const rng2 = seededRandom(def.id.length * 131 + 17);
     const area = W * D;
     const inRect = (x: number, z: number, r: RectDef) => x > r.minX && x < r.maxX && z > r.minZ && z < r.maxZ;
@@ -874,7 +917,7 @@ export function buildLevel(def: LevelDef): LevelRuntime {
   }
 
   // ---- sky: gradient dome + sun disc + drifting cloud puffs ----
-  {
+  if (!def.underground) {
     const skyDef = def.time === "day"
       ? { top: 0x6ea9d4, horizon: 0xe8dcc0, sun: 0xfff4d8, sunPos: [40, 55, 22] as const, clouds: 0xffffff, cloudOp: 0.85 }
       : def.time === "dusk"
@@ -937,7 +980,12 @@ export function buildLevel(def: LevelDef): LevelRuntime {
   let hemi: THREE.HemisphereLight;
   let skyColor: number;
   // hemisphere is a light touch only — image-based env lighting fills the rest
-  if (def.time === "day") {
+  if (def.underground) {
+    skyColor = 0x04060a;
+    sun = new THREE.DirectionalLight(0xbcc8d8, 0.7); // faint utility glow from above
+    sun.position.set(4, 30, 6);
+    hemi = new THREE.HemisphereLight(0x3a4048, 0x201a12, 0.85);
+  } else if (def.time === "day") {
     skyColor = PALETTE.skyDay;
     sun = new THREE.DirectionalLight(PALETTE.sunDay, 3.0);
     sun.position.set(40, 55, 22);

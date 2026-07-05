@@ -86,7 +86,8 @@ export function building(o: BuildingOpts): THREE.Group {
     // gable: full-length ridge; hip: ridge shrinks so end slopes pitch inward
     const ridgeHalf = style === "hip" ? Math.max(0.5, along / 2 - across / 2) : ea;
     const roofTints = [0xffffff, 0xe8d0bc, 0xd9bfa8];
-    const roofMat = mat(roofTints[Math.floor(rng() * roofTints.length)], { map: "roof", repeat: [along / 3, 2] });
+    const roofMat = mat(roofTints[Math.floor(rng() * roofTints.length)], { map: "roof", repeat: [along / 3, 2] }).clone();
+    roofMat.side = THREE.DoubleSide; // visible from beneath the eaves too
 
     const verts: number[] = [];
     const uvs: number[] = [];
@@ -247,10 +248,12 @@ export function wallSegment(length: number, height: number, stone = false): THRE
 export function archGate(width: number, height: number): THREE.Group {
   const g = new THREE.Group();
   const m = mat(0xffffff, { map: "stone", repeat: [1.5, height / 2] });
-  g.add(box(1.0, height, 1.0, m, -width / 2 - 0.5, height / 2, 0));
-  g.add(box(1.0, height, 1.0, m, width / 2 + 0.5, height / 2, 0));
-  g.add(box(width + 2, 0.9, 1.2, m, 0, height + 0.45, 0));
-  g.add(box(width + 2.4, 0.2, 1.4, mat(PALETTE.terracottaDark), 0, height + 1.0, 0));
+  // pillars 1.4 wide so they overlap the abutting wall ends instead of
+  // meeting them edge-to-edge (tangent boxes read as a floating gate)
+  g.add(box(1.4, height, 1.2, m, -width / 2 - 0.5, height / 2, 0));
+  g.add(box(1.4, height, 1.2, m, width / 2 + 0.5, height / 2, 0));
+  g.add(box(width + 2.4, 0.9, 1.3, m, 0, height + 0.45, 0));
+  g.add(box(width + 2.8, 0.2, 1.5, mat(PALETTE.terracottaDark), 0, height + 1.0, 0));
   return g;
 }
 
@@ -763,6 +766,44 @@ export function lampPost(lit: boolean): THREE.Group {
     glow.scale.set(2.4, 2.4, 1);
     glow.position.set(0, 3.55, 0);
     g.add(glow);
+  }
+  return g;
+}
+
+/** crypt floor brazier: stone bowl, glowing coals, optional real light */
+export function brazier(withLight = true): THREE.Group {
+  const g = new THREE.Group();
+  const stone = mat(0xffffff, { map: "stone", repeat: [1, 0.5] });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 0.75, 7), stone);
+  base.position.y = 0.375;
+  base.castShadow = true;
+  g.add(base);
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.2, 0.3, 8), stone);
+  bowl.position.y = 0.95;
+  g.add(bowl);
+  const coals = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.34, 0.1, 8),
+    mat(0xff9448, { emissive: 0xff6a22, emissiveIntensity: 1.6, flat: true }),
+  );
+  coals.position.y = 1.08;
+  g.add(coals);
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.5, 6),
+    mat(0xffc46a, { emissive: 0xffaa33, emissiveIntensity: 2.4, flat: true }),
+  );
+  flame.position.y = 1.34;
+  g.add(flame);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: lampGlowTexture(), color: 0xff9a4a, transparent: true, opacity: 0.7,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  glow.scale.set(1.9, 1.9, 1);
+  glow.position.y = 1.3;
+  g.add(glow);
+  if (withLight) {
+    const light = new THREE.PointLight(0xff9a4a, 11, 11, 1.7);
+    light.position.set(0, 1.6, 0);
+    g.add(light);
   }
   return g;
 }

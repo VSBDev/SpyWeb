@@ -65,6 +65,7 @@ const GradeShader = {
 export interface PostStack {
   render(scene: THREE.Scene, camera: THREE.Camera, dt: number): void;
   setSize(w: number, h: number): void;
+  composer: EffectComposer;
 }
 
 export function createPostStack(renderer: THREE.WebGLRenderer): PostStack {
@@ -81,6 +82,7 @@ export function createPostStack(renderer: THREE.WebGLRenderer): PostStack {
 
   let t = 0;
   return {
+    composer,
     render(scene, camera, dt) {
       t += dt;
       renderPass.scene = scene;
