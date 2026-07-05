@@ -62,7 +62,7 @@ const tutorial: LevelDef = {
     { kind: "bush", x: 9, z: -20, seed: 3 },
     { kind: "bush", x: -12, z: -4, seed: 5 },
     { kind: "laundry", x: -10, z: -27, length: 5 },
-    { kind: "house", x: -28, z: -4, w: 6, d: 5, door: "E", seed: 3 },
+    { kind: "house", x: -28, z: -4, w: 9, d: 6, door: "E", seed: 3 },
     // fishing-village dressing
     { kind: "netrack", x: -6, z: 22, rot: 0.3 },
     { kind: "netrack", x: 9, z: 23, rot: -0.4 },
@@ -194,7 +194,7 @@ const villa: LevelDef = {
     { kind: "pickup", x: -8, z: -17, what: "stones", amount: 3 },
     { kind: "pickup", x: -40, z: -30, what: "ammo", amount: 3 },
     // garden shed (enterable) + old well
-    { kind: "house", x: 38, z: 14, w: 7, d: 6, door: "W", seed: 8 },
+    { kind: "house", x: 38, z: 14, w: 10, d: 6, door: "W", seed: 8 },
     { kind: "pickup", x: 39, z: 15, what: "ammo", amount: 3 },
     { kind: "well", x: -33, z: -16 },
     // estate dressing
@@ -379,7 +379,7 @@ const harbor: LevelDef = {
     { kind: "pickup", x: 14, z: -16.5, what: "stones", amount: 3 },
     { kind: "pickup", x: -27, z: -40, what: "ammo", amount: 3 },
     // dockmaster hut (enterable) + cistern well
-    { kind: "house", x: -50, z: -15, w: 7, d: 6, door: "E", seed: 12 },
+    { kind: "house", x: -50, z: -15, w: 10, d: 7, door: "E", seed: 12 },
     { kind: "pickup", x: -51, z: -16, what: "stones", amount: 3 },
     { kind: "well", x: -27, z: 5 },
     // waterfront dressing
@@ -564,7 +564,7 @@ const monastery: LevelDef = {
     { kind: "pickup", x: -12, z: 16, what: "stones", amount: 3 },
     { kind: "pickup", x: -28, z: -16, what: "ammo", amount: 3 },
     // sacristy (enterable) + cloister well
-    { kind: "house", x: -30, z: -27, w: 6, d: 5, door: "N", seed: 17, color: 0xe4d6be },
+    { kind: "house", x: -27, z: -26.5, w: 9, d: 6, door: "S", seed: 17, color: 0xe4d6be },
     { kind: "pickup", x: -31, z: -28, what: "ammo", amount: 3 },
     { kind: "well", x: -18, z: 14 },
     // cloister dressing

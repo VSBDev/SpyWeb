@@ -222,6 +222,11 @@ function itemColliders(item: Item): BoxCollider[] {
     case "sweeper": break;
     case "house": {
       for (const s of houseSegments(item)) c.push(makeBox(s.cx, s.cz, s.w, s.d, HOUSE_H));
+      {
+        const plan = housePlan(item);
+        for (const s of plan.partitions) c.push(makeBox(s.cx, s.cz, s.w, s.d, HOUSE_H));
+        for (const f of plan.furn) c.push({ ...makeBox(f.cx, f.cz, f.w, f.d, f.h), noNav: true });
+      }
       break;
     }
     case "well": c.push(makeBox(item.x, item.z, 1.8, 1.8, 1.0)); break;
@@ -314,6 +319,80 @@ function houseSegments(it: Extract<Item, { kind: "house" }>): { cx: number; cz: 
 
 const HOUSE_H = 2.9;
 
+// ============================================================================
+// Procedural interiors: houses with a long axis >= 8.5m split into two rooms
+// joined by an interior doorway; each room draws a themed furniture kit.
+// The plan is seeded and deterministic — colliders and meshes derive from it.
+// ============================================================================
+
+type RoomKit = "quarters" | "office" | "storage" | "mess";
+interface HSeg { cx: number; cz: number; w: number; d: number }
+interface RoomPlan { cx: number; cz: number; w: number; d: number; kit: RoomKit }
+interface FurnPiece { cx: number; cz: number; w: number; d: number; h: number }
+interface HousePlanT { partitions: HSeg[]; rooms: RoomPlan[]; furn: FurnPiece[] }
+
+function housePlan(it: Extract<Item, { kind: "house" }>): HousePlanT {
+  const rng = seededRandom((it.seed ?? 5) * 31 + 7);
+  const t = 0.3, doorW = 3.0, wallT = 0.35;
+  const partitions: HSeg[] = [];
+  const rooms: RoomPlan[] = [];
+  const kits: RoomKit[] = ["quarters", "office", "storage", "mess"];
+  const k1 = kits[Math.floor(rng() * 4)];
+  const k2 = kits[(kits.indexOf(k1) + 1 + Math.floor(rng() * 3)) % 4];
+
+  if (Math.max(it.w, it.d) >= 8.5) {
+    // the interior doorway must sit at the same end as the OUTER door when
+    // the partition meets that wall — otherwise it bisects the entrance
+    const doorSign = { N: -1, S: 1, W: -1, E: 1 }[it.door];
+    if (it.w >= it.d) {
+      // partition runs along Z at x = mx
+      const mx = it.x + (rng() - 0.5) * 1.2;
+      const zMin = it.z - it.d / 2 + wallT, zMax = it.z + it.d / 2 - wallT;
+      const gapSide = (it.door === "N" || it.door === "S") ? doorSign : (rng() < 0.5 ? -1 : 1);
+      const gapC = it.z + gapSide * (it.d / 2 - wallT - doorW / 2 - 0.2);
+      const g0 = gapC - doorW / 2, g1 = gapC + doorW / 2;
+      if (g0 - zMin > 0.25) partitions.push({ cx: mx, cz: (zMin + g0) / 2, w: t, d: g0 - zMin });
+      if (zMax - g1 > 0.25) partitions.push({ cx: mx, cz: (g1 + zMax) / 2, w: t, d: zMax - g1 });
+      rooms.push({ cx: (it.x - it.w / 2 + mx) / 2, cz: it.z, w: mx - (it.x - it.w / 2) - 0.8, d: it.d - 1.0, kit: k1 });
+      rooms.push({ cx: (mx + it.x + it.w / 2) / 2, cz: it.z, w: (it.x + it.w / 2) - mx - 0.8, d: it.d - 1.0, kit: k2 });
+    } else {
+      const mz = it.z + (rng() - 0.5) * 1.2;
+      const xMin = it.x - it.w / 2 + wallT, xMax = it.x + it.w / 2 - wallT;
+      const gapSide = (it.door === "E" || it.door === "W") ? doorSign : (rng() < 0.5 ? -1 : 1);
+      const gapC = it.x + gapSide * (it.w / 2 - wallT - doorW / 2 - 0.2);
+      const g0 = gapC - doorW / 2, g1 = gapC + doorW / 2;
+      if (g0 - xMin > 0.25) partitions.push({ cx: (xMin + g0) / 2, cz: mz, w: g0 - xMin, d: t });
+      if (xMax - g1 > 0.25) partitions.push({ cx: (g1 + xMax) / 2, cz: mz, w: xMax - g1, d: t });
+      rooms.push({ cx: it.x, cz: (it.z - it.d / 2 + mz) / 2, w: it.w - 1.0, d: mz - (it.z - it.d / 2) - 0.8, kit: k1 });
+      rooms.push({ cx: it.x, cz: (mz + it.z + it.d / 2) / 2, w: it.w - 1.0, d: (it.z + it.d / 2) - mz - 0.8, kit: k2 });
+    }
+  } else {
+    rooms.push({ cx: it.x, cz: it.z, w: it.w - 1.0, d: it.d - 1.0, kit: k1 });
+  }
+
+  // large furniture per kit, anchored to opposite room corners (corners flank
+  // the centered outer door and sit clear of the end-of-partition doorway)
+  const furn: FurnPiece[] = [];
+  for (const r of rooms) {
+    const cornerA = { x: r.cx - r.w / 2 + 0.75, z: r.cz - r.d / 2 + 0.8 };
+    const cornerB = { x: r.cx + r.w / 2 - 0.75, z: r.cz + r.d / 2 - 0.8 };
+    if (r.kit === "quarters") {
+      furn.push({ cx: cornerA.x, cz: cornerA.z + 0.3, w: 0.95, d: 2.0, h: 0.55 }); // cot
+      furn.push({ cx: cornerB.x, cz: cornerB.z, w: 0.75, d: 0.5, h: 0.8 });        // chest
+    } else if (r.kit === "office") {
+      furn.push({ cx: cornerA.x + 0.2, cz: cornerA.z, w: 1.45, d: 0.8, h: 0.85 }); // desk
+      furn.push({ cx: cornerB.x, cz: cornerB.z, w: 0.5, d: 1.4, h: 1.7 });         // shelf
+    } else if (r.kit === "storage") {
+      furn.push({ cx: cornerA.x, cz: cornerA.z, w: 1.3, d: 1.3, h: 1.2 });         // crates
+      furn.push({ cx: cornerB.x, cz: cornerB.z, w: 0.9, d: 0.9, h: 1.0 });         // barrel
+    } else {
+      furn.push({ cx: r.cx, cz: r.cz, w: 2.0, d: 0.9, h: 0.85 });                  // mess table
+      furn.push({ cx: cornerB.x, cz: cornerB.z, w: 0.6, d: 0.6, h: 0.5 });         // baskets
+    }
+  }
+  return { partitions, rooms, furn };
+}
+
 function buildHouse(it: Extract<Item, { kind: "house" }>, night: boolean): { group: THREE.Group; roof: THREE.Object3D } {
   const g = new THREE.Group();
   const rng = seededRandom(it.seed ?? 5);
@@ -333,36 +412,64 @@ function buildHouse(it: Extract<Item, { kind: "house" }>, night: boolean): { gro
   floor.position.y = 0.03;
   floor.receiveShadow = true;
   g.add(floor);
-  // furniture: table + stool + shelf + cot
-  const wood = mat(0xffffff, { map: "wood" });
-  const table = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 0.8), wood);
-  table.position.set(-it.w / 4, 0.75, -it.d / 4);
-  table.castShadow = true;
-  g.add(table);
-  for (const [lx, lz] of [[-0.55, -0.3], [0.55, -0.3], [-0.55, 0.3], [0.55, 0.3]]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.08), wood);
-    leg.position.set(-it.w / 4 + lx, 0.36, -it.d / 4 + lz);
-    g.add(leg);
+  // interior: seeded room plan — partition walls + themed furniture kits
+  const plan = housePlan(it);
+  for (const s of plan.partitions) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(s.w, HOUSE_H, s.d), wallMat);
+    m.position.set(s.cx - it.x, HOUSE_H / 2, s.cz - it.z);
+    m.castShadow = true; m.receiveShadow = true;
+    g.add(m);
   }
-  const stool = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.45, 0.4), wood);
-  stool.position.set(-it.w / 4 + 1.1, 0.22, -it.d / 4 + 0.2);
-  stool.castShadow = true;
-  g.add(stool);
-  const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.7, 1.3), mat(PALETTE.woodDark, { flat: true }));
-  shelf.position.set(it.w / 2 - 0.65, 0.85, -it.d / 4);
-  shelf.castShadow = true;
-  g.add(shelf);
-  const cot = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 1.9), mat(0x8a8272, { flat: true }));
-  cot.position.set(it.w / 4, 0.2, it.d / 4);
-  cot.castShadow = true;
-  g.add(cot);
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.4), mat(0xe8e0ce, { flat: true }));
-  pillow.position.set(it.w / 4, 0.47, it.d / 4 - 0.65);
-  g.add(pillow);
-  // warm interior light
-  const lamp = new THREE.PointLight(0xffd9a0, night ? 8 : 3.5, 7, 1.8);
-  lamp.position.set(0, 2.2, 0);
-  g.add(lamp);
+  const wood = mat(0xffffff, { map: "wood" });
+  const woodDark = mat(PALETTE.woodDark, { flat: true });
+  const addBox = (cx: number, cz: number, w: number, d: number, y: number, h: number, m: THREE.Material) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    b.position.set(cx - it.x, y, cz - it.z);
+    b.castShadow = true; b.receiveShadow = true;
+    g.add(b);
+    return b;
+  };
+  for (const r of plan.rooms) {
+    // rug + a warm lamp per room
+    const rugColors = [0x8a4432, 0x38635f, 0x7a5230, 0x5a626a];
+    const rug = new THREE.Mesh(
+      new THREE.PlaneGeometry(Math.min(2.4, r.w * 0.55), Math.min(1.7, r.d * 0.45)),
+      mat(rugColors[Math.floor(rng() * rugColors.length)], { rough: 0.98 })
+    );
+    rug.rotation.x = -Math.PI / 2;
+    rug.rotation.z = (rng() - 0.5) * 0.2;
+    rug.position.set(r.cx - it.x, 0.05, r.cz - it.z);
+    rug.receiveShadow = true;
+    g.add(rug);
+    const lamp = new THREE.PointLight(0xffd9a0, night ? 7 : 3, 6.5, 1.8);
+    lamp.position.set(r.cx - it.x, 2.2, r.cz - it.z);
+    g.add(lamp);
+    // kit dressing (visual counterparts of the plan's colliders)
+    const cornerA = { x: r.cx - r.w / 2 + 0.75, z: r.cz - r.d / 2 + 0.8 };
+    const cornerB = { x: r.cx + r.w / 2 - 0.75, z: r.cz + r.d / 2 - 0.8 };
+    if (r.kit === "quarters") {
+      addBox(cornerA.x, cornerA.z + 0.3, 0.95, 2.0, 0.26, 0.42, mat(0x8a8272, { flat: true }));
+      addBox(cornerA.x, cornerA.z - 0.45, 0.62, 0.42, 0.5, 0.14, mat(0xe8e0ce, { flat: true })); // pillow
+      addBox(cornerB.x, cornerB.z, 0.75, 0.5, 0.4, 0.75, woodDark); // chest
+    } else if (r.kit === "office") {
+      addBox(cornerA.x + 0.2, cornerA.z, 1.45, 0.8, 0.78, 0.09, wood); // desktop
+      addBox(cornerA.x + 0.2, cornerA.z, 1.3, 0.65, 0.38, 0.7, woodDark); // desk body
+      addBox(cornerA.x + 0.2, cornerA.z + 0.05, 0.45, 0.32, 0.86, 0.05, mat(0xf4eee0, { flat: true })); // papers
+      addBox(cornerA.x + 1.0, cornerA.z + 0.6, 0.4, 0.4, 0.24, 0.48, wood); // stool
+      addBox(cornerB.x, cornerB.z, 0.5, 1.4, 0.85, 1.7, woodDark); // shelf
+    } else if (r.kit === "storage") {
+      addBox(cornerA.x, cornerA.z, 1.25, 1.25, 0.6, 1.2, wood); // crates
+      addBox(cornerA.x + 0.35, cornerA.z - 0.3, 0.7, 0.7, 1.45, 0.5, wood);
+      addBox(cornerB.x, cornerB.z, 0.85, 0.85, 0.52, 1.05, mat(0x6a7047, { flat: true })); // barrel-ish
+      addBox(cornerB.x - 0.9, cornerB.z + 0.1, 0.6, 0.45, 0.25, 0.5, mat(0xb0a175, { flat: true })); // sacks
+    } else {
+      addBox(r.cx, r.cz, 2.0, 0.9, 0.78, 0.09, wood); // mess table
+      addBox(r.cx, r.cz, 1.8, 0.7, 0.38, 0.7, woodDark);
+      addBox(r.cx, r.cz - 0.85, 1.7, 0.32, 0.26, 0.45, wood); // bench
+      addBox(r.cx, r.cz + 0.85, 1.7, 0.32, 0.26, 0.45, wood); // bench
+      addBox(cornerB.x, cornerB.z, 0.55, 0.55, 0.2, 0.4, mat(0xc4a066, { flat: true })); // baskets
+    }
+  }
   // roof (hidden when the player is inside)
   const roof = new THREE.Group();
   // NOTE ×√2: a 4-sided cone rotated 45° has axis half-extent radius/√2,

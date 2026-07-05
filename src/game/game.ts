@@ -79,7 +79,7 @@ function fanGeo(half: number): THREE.BufferGeometry {
   return g;
 }
 
-type BarkKind = "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm";
+type BarkKind = "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm" | "buddy";
 const BARK_LINES: Record<BarkKind, string[]> = {
   curious: ["Huh? Who's there?", "You hear that?", "What was that?", "Hm... something moved."],
   investigate: ["Going to check it out.", "Probably a cat. Probably.", "Eyes open..."],
@@ -88,6 +88,7 @@ const BARK_LINES: Record<BarkKind, string[]> = {
   lost: ["Must've been nothing...", "Gone. If he was ever there.", "All quiet. Resuming rounds.", "Lost him. Stay sharp."],
   body: ["MAN DOWN! Man down!", "Body here! We're not alone!", "Somebody killed Rocco!"],
   alarm: ["Hit the alarm!", "I'm calling it in!", "Sound the alarm — GO!"],
+  buddy: ["Marco? Where'd you go?", "Post six, report in.", "He should be right here...", "Where the hell is Rocco?"],
 };
 
 const CHATTER_LINES: [string, string][] = [
@@ -190,6 +191,16 @@ export class Mission {
     this.player.setup(def.playerStart.x, def.playerStart.z, def.playerStart.angle, def.ammo, def.stones, gear, this.level.colliders, this.level.grass, def.bounds);
 
     for (const g of def.guards) this.guards.push(new Guard(g, this.scene, def.time === "night"));
+    // pair each guard with his nearest colleague — a vanished buddy raises questions
+    this.guards.forEach((g, i) => {
+      let best = -1, bestD = Infinity;
+      this.guards.forEach((o, j) => {
+        if (i === j) return;
+        const d = dist2D(g.def.x, g.def.z, o.def.x, o.def.z);
+        if (d < bestD) { bestD = d; best = j; }
+      });
+      if (bestD < 26) g.buddy = best;
+    });
 
     this.objectives = new ObjectiveSystem(this.level, this.scene, audio);
     this.objectives.onUpdate = () => this.refreshObjectiveHud();

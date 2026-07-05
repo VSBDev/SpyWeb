@@ -301,7 +301,7 @@ export class AudioEngine {
   }
 
   /** radio-filtered voice gibberish: syllable blips with a pitch contour per mood */
-  bark(kind: "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm", dist: number) {
+  bark(kind: "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm" | "buddy", dist: number) {
     const v = this.distGain(dist, 40) * 0.55 + 0.05;
     const t0 = this.ctx.currentTime;
     const contours: Record<string, { n: number; base: number; step: number; rate: number }> = {
@@ -312,6 +312,7 @@ export class AudioEngine {
       lost: { n: 3, base: 210, step: -26, rate: 0.17 },
       body: { n: 4, base: 250, step: 14, rate: 0.09 },
       alarm: { n: 3, base: 270, step: 18, rate: 0.08 },
+      buddy: { n: 3, base: 195, step: 24, rate: 0.15 },
     };
     const c = contours[kind];
     for (let i = 0; i < c.n; i++) {

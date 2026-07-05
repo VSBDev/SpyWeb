@@ -16,7 +16,7 @@ export class NavGrid {
     this.h = Math.ceil((maxZ - minZ) / this.cell);
     this.walk = new Uint8Array(this.w * this.h).fill(1);
     for (const c of colliders) {
-      if (!c.solid) continue;
+      if (!c.solid || c.noNav) continue;
       const x0 = Math.floor((c.minX - agentRadius - minX) / this.cell);
       const x1 = Math.floor((c.maxX + agentRadius - minX) / this.cell);
       const z0 = Math.floor((c.minZ - agentRadius - minZ) / this.cell);

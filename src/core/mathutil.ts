@@ -29,6 +29,8 @@ export interface BoxCollider {
   height: number; // top of the obstacle above ground
   /** blocks movement (some vision blockers like tall hedges may still block walk too) */
   solid: boolean;
+  /** physical + sight-blocking but ignored by the nav grid (small furniture) */
+  noNav?: boolean;
 }
 
 export function makeBox(cx: number, cz: number, w: number, d: number, height: number, solid = true): BoxCollider {

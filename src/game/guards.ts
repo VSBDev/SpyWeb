@@ -21,7 +21,7 @@ export interface AIWorld {
   raiseAlarm(atX: number, z: number): void;
   onGuardAlerted(): void;               // any guard entered combat
   onGuardShoot(g: Guard): void;         // resolve guard -> player shot
-  bark(g: Guard, kind: "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm"): void;
+  bark(g: Guard, kind: "curious" | "investigate" | "spotted" | "search" | "lost" | "body" | "alarm" | "buddy"): void;
   /** returns true if a reflex window was granted (combat wave deferred) */
   tryReflex(g: Guard): boolean;
   alarmPanels: { x: number; z: number }[];
@@ -80,6 +80,8 @@ export class Guard {
   barkT = 0;                   // per-guard bark cooldown, managed by the mission
   dumped = false;              // body disposed of in a well — gone for good
   seesPlayer = false;          // true on frames where the player is in this guard's sight
+  buddy = -1;                  // index of the patrol partner this guard keeps an eye on
+  private buddyCheckT = 15 + Math.random() * 25;
   private staggerT = 0;        // flinch timer after surviving a hit
   humanoid: Humanoid;
   def: GuardDef;
@@ -176,6 +178,18 @@ export class Guard {
     if (this.dead) return;
     this.dead = true;
     this.state = "dead";
+    // anyone watching this man drop reacts NOW, not when they trip over him
+    for (const w of world.guards) {
+      if (w === this || w.dead || w.state === "combat" || w.state === "alarm-run") continue;
+      const d = dist2D(w.pos.x, w.pos.z, this.pos.x, this.pos.z);
+      if (d > w.viewDist * 0.85) continue;
+      const angTo = Math.atan2(this.pos.x - w.pos.x, this.pos.z - w.pos.z);
+      if (Math.abs(angleDelta(w.yaw, angTo)) > FOV_HALF) continue;
+      if (!world.los(w.pos.x, w.pos.z, this.pos.x, this.pos.z, 0.85)) continue;
+      this.discoveredBody = true; // seen falling — no later "discovery" needed
+      w.lastKnown = { x: world.player.pos.x, z: world.player.pos.z };
+      w.witnessKill(world);
+    }
     this.awareness = 0;
     this.visionMesh.visible = false;
     this.markerMat.opacity = 0;
@@ -299,6 +313,12 @@ export class Guard {
     }
   }
 
+  /** a comrade just dropped in front of this guard: immediate combat */
+  witnessKill(world: AIWorld) {
+    world.bark(this, "body");
+    this.enterCombat(world);
+  }
+
   /** visibility factor 0..1 for the player right now */
   private visibility(world: AIWorld): number {
     const p = world.player;
@@ -380,6 +400,18 @@ export class Guard {
     switch (this.state) {
       case "patrol": {
         this.headYaw = Math.sin(this.stateT * 0.8) * 0.4;
+        // periodic buddy check: a missing partner is a red flag
+        this.buddyCheckT -= dt;
+        if (this.buddyCheckT <= 0) {
+          this.buddyCheckT = 30 + Math.random() * 25;
+          const b = this.buddy >= 0 ? world.guards[this.buddy] : null;
+          if (b && (b.dead || b.dumped)) {
+            world.bark(this, "buddy");
+            this.awareness = Math.max(this.awareness, 0.5);
+            this.startInvestigate(world, b.def.x, b.def.z);
+            break;
+          }
+        }
         if (this.patrol.length === 0) {
           // static sentry: drift back to post
           const dHome = dist2D(this.pos.x, this.pos.z, this.home.x, this.home.z);

@@ -234,4 +234,5 @@ window.spyweb = {
   get state() { return state; },
   input, audio, save,
   startMission, LEVELS, CROUCH_TUNE,
+  renderer, post,
 };

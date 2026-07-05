@@ -15,8 +15,8 @@ const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     time: { value: 0 },
-    saturation: { value: 1.14 },
-    contrast: { value: 1.06 },
+    saturation: { value: 1.18 },
+    contrast: { value: 1.08 },
     warmth: { value: 0.035 },
     vignette: { value: 0.42 },
     grain: { value: 0.028 },
@@ -43,6 +43,12 @@ const GradeShader = {
       c = (c - 0.5) * contrast + 0.5;
       // warm sun-bleached tint
       c.r += warmth; c.b -= warmth * 0.6;
+      // cinematic split-tone: teal shadows, golden highlights
+      float lum = dot(c, vec3(0.299, 0.587, 0.114));
+      float shadowW = 1.0 - smoothstep(0.0, 0.45, lum);
+      float highW = smoothstep(0.55, 1.0, lum);
+      c += vec3(-0.03, 0.015, 0.035) * shadowW;   // shadows toward teal
+      c += vec3(0.045, 0.025, -0.02) * highW;     // highlights toward gold
       // saturation
       float l = dot(c, vec3(0.299, 0.587, 0.114));
       c = mix(vec3(l), c, saturation);

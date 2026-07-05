@@ -1,11 +1,16 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mat, PALETTE } from "./materials";
 import { clamp, damp, lerp } from "../core/mathutil";
 
 /**
- * Low-poly humanoid with a procedural animation rig (no keyframe data).
- * Joints are pivot groups; poses are computed every frame from a small
- * parameter set (speed, crouch, aim, death...).
+ * Skinned humanoid with a real bone rig. The skeleton is built in code
+ * (hips -> torso -> head, full arm and leg chains) and a smooth tube-based
+ * body mesh is skinned to it with blended weights at every joint, so elbows
+ * and knees bend instead of hinging as separate boxes.
+ *
+ * Poses are procedural: the same parameter set as ever (speed, crouch, aim,
+ * dead...) writes bone rotations every frame.
  */
 
 export interface HumanoidStyle {
@@ -16,41 +21,212 @@ export interface HumanoidStyle {
   officer?: boolean;
 }
 
+// rest-pose landmarks (root space, character faces +Z)
+const REST = {
+  pelvisY: 0.96,
+  torsoLocalY: 0.14,   // pelvis -> torso joint
+  headLocalY: 0.72,    // torso -> head joint
+  shoulderX: 0.27, shoulderLocalY: 0.56,
+  elbowDrop: 0.33, wristDrop: 0.30,
+  hipX: 0.13, hipLocalY: -0.08,
+  kneeDrop: 0.4, ankleDrop: 0.42,
+};
+
+interface SkinPart {
+  geo: THREE.BufferGeometry;
+  bone: number;                       // primary bone index
+  blend?: { atY: number; other: number; range: number }; // blend toward `other` near atY
+  color: number;
+}
+
+function colorOf(hex: number): [number, number, number] {
+  const c = new THREE.Color(hex);
+  return [c.r, c.g, c.b];
+}
+
+/** apply skin indices/weights + vertex colors to a positioned part geometry */
+function skinPart(part: SkinPart) {
+  const pos = part.geo.getAttribute("position") as THREE.BufferAttribute;
+  const n = pos.count;
+  const idx = new Uint16Array(n * 4);
+  const wgt = new Float32Array(n * 4);
+  const col = new Float32Array(n * 3);
+  const [r, g, b] = colorOf(part.color);
+  for (let i = 0; i < n; i++) {
+    let wOther = 0;
+    if (part.blend) {
+      const d = Math.abs(pos.getY(i) - part.blend.atY);
+      wOther = 0.5 * Math.max(0, 1 - d / part.blend.range);
+    }
+    idx[i * 4] = part.bone;
+    idx[i * 4 + 1] = part.blend ? part.blend.other : part.bone;
+    wgt[i * 4] = 1 - wOther;
+    wgt[i * 4 + 1] = wOther;
+    col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+  }
+  part.geo.setAttribute("skinIndex", new THREE.BufferAttribute(idx, 4));
+  part.geo.setAttribute("skinWeight", new THREE.BufferAttribute(wgt, 4));
+  part.geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+}
+
+/** vertical tapered tube positioned in rest space */
+function tube(x: number, topY: number, botY: number, rTop: number, rBot: number, radial = 10): THREE.BufferGeometry {
+  const h = topY - botY;
+  const geo = new THREE.CylinderGeometry(rTop, rBot, h, radial, 3);
+  geo.translate(x, botY + h / 2, 0);
+  return geo;
+}
+
+function ball(x: number, y: number, r: number, sy = 1, z = 0): THREE.BufferGeometry {
+  const geo = new THREE.SphereGeometry(r, 10, 7);
+  geo.scale(1, sy, 1);
+  geo.translate(x, y, z);
+  return geo;
+}
+
 export class Humanoid {
-  root: THREE.Group;          // at feet, +Z forward is character facing -Z? we use -Z forward like three cameras? No: +Z forward for simplicity via lookAt handled by yaw.
-  private pelvis: THREE.Group;
-  private torso: THREE.Group;
-  private headG: THREE.Group;
-  private armL: THREE.Group; private armR: THREE.Group;      // shoulder pivots
-  private foreL: THREE.Group; private foreR: THREE.Group;    // elbow pivots
-  private legL: THREE.Group; private legR: THREE.Group;      // hip pivots
-  private shinL: THREE.Group; private shinR: THREE.Group;    // knee pivots
-  weaponG: THREE.Group;       // attached to right forearm
+  root: THREE.Group;
+  weaponG: THREE.Group;
   flashlight: THREE.SpotLight | null = null;
   flashTarget: THREE.Object3D | null = null;
 
+  // joints (bones) — same names/conventions as the old group rig
+  private pelvis: THREE.Bone;
+  private torso: THREE.Bone;
+  private headG: THREE.Bone;
+  private armL: THREE.Bone; private armR: THREE.Bone;
+  private foreL: THREE.Bone; private foreR: THREE.Bone;
+  private legL: THREE.Bone; private legR: THREE.Bone;
+  private shinL: THREE.Bone; private shinR: THREE.Bone;
+
   private phase = 0;
-  private deadT = -1;         // -1 alive; else seconds since death
+  private deadT = -1;
   private crouchBlend = 0;
   private aimBlend = 0;
-  private meshes: THREE.Mesh[] = [];
+  private fadeMats: THREE.Material[] = [];
 
   constructor(style: HumanoidStyle, weapon: "rifle" | "pistol" | "none") {
     this.root = new THREE.Group();
-    const suit = mat(style.suit, { flat: true });
-    const pants = mat(style.pants ?? style.suit, { flat: true });
-    const skin = mat(style.skin ?? PALETTE.skin, { flat: true });
 
-    const B = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-      mesh.position.set(x, y, z);
-      mesh.castShadow = true;
-      parent.add(mesh);
-      this.meshes.push(mesh);
-      return mesh;
+    // ---- skeleton ----
+    const B = (x: number, y: number, z: number, parent?: THREE.Bone) => {
+      const bone = new THREE.Bone();
+      bone.position.set(x, y, z);
+      parent?.add(bone);
+      return bone;
     };
+    this.pelvis = B(0, REST.pelvisY, 0);
+    this.torso = B(0, REST.torsoLocalY, 0, this.pelvis);
+    this.headG = B(0, REST.headLocalY, 0, this.torso);
+    this.armL = B(-REST.shoulderX, REST.shoulderLocalY, 0, this.torso);
+    this.armR = B(REST.shoulderX, REST.shoulderLocalY, 0, this.torso);
+    this.foreL = B(0, -REST.elbowDrop, 0, this.armL);
+    this.foreR = B(0, -REST.elbowDrop, 0, this.armR);
+    this.legL = B(-REST.hipX, REST.hipLocalY, 0, this.pelvis);
+    this.legR = B(REST.hipX, REST.hipLocalY, 0, this.pelvis);
+    this.shinL = B(0, -REST.kneeDrop, 0, this.legL);
+    this.shinR = B(0, -REST.kneeDrop, 0, this.legR);
+    const bones = [
+      this.pelvis, this.torso, this.headG,
+      this.armL, this.armR, this.foreL, this.foreR,
+      this.legL, this.legR, this.shinL, this.shinR,
+    ];
+    const BI = { pelvis: 0, torso: 1, head: 2, armL: 3, armR: 4, foreL: 5, foreR: 6, legL: 7, legR: 8, shinL: 9, shinR: 10 };
 
-    // soft contact shadow so the character grounds visually
+    // ---- rest-space landmarks for the geometry ----
+    const shoulderY = REST.pelvisY + REST.torsoLocalY + REST.shoulderLocalY; // 1.66
+    const elbowY = shoulderY - REST.elbowDrop;   // 1.33
+    const wristY = elbowY - REST.wristDrop;      // 1.03
+    const hipY = REST.pelvisY + REST.hipLocalY;  // 0.88
+    const kneeY = hipY - REST.kneeDrop;          // 0.48
+    const ankleY = kneeY - REST.ankleDrop;       // 0.06
+    const headBase = REST.pelvisY + REST.torsoLocalY + REST.headLocalY; // 1.82
+
+    const suit = style.suit;
+    const pants = style.pants ?? style.suit;
+    const skin = style.skin ?? PALETTE.skin;
+
+    const parts: SkinPart[] = [
+      // trunk
+      { geo: tube(0, 1.06, 0.85, 0.195, 0.185), bone: BI.pelvis, color: pants },
+      { geo: tube(0, shoulderY + 0.02, 1.02, 0.2, 0.165), bone: BI.torso, blend: { atY: 1.06, other: BI.pelvis, range: 0.14 }, color: suit },
+      // neck + head
+      { geo: tube(0, headBase + 0.06, headBase - 0.16, 0.062, 0.075), bone: BI.head, blend: { atY: headBase - 0.16, other: BI.torso, range: 0.1 }, color: skin },
+      { geo: ball(0, headBase + 0.17, 0.15, 1.18), bone: BI.head, color: skin },
+      // arms
+      { geo: tube(-REST.shoulderX, shoulderY, elbowY, 0.075, 0.063), bone: BI.armL, blend: { atY: shoulderY, other: BI.torso, range: 0.09 }, color: suit },
+      { geo: tube(REST.shoulderX, shoulderY, elbowY, 0.075, 0.063), bone: BI.armR, blend: { atY: shoulderY, other: BI.torso, range: 0.09 }, color: suit },
+      { geo: tube(-REST.shoulderX, elbowY, wristY, 0.06, 0.049), bone: BI.foreL, blend: { atY: elbowY, other: BI.armL, range: 0.09 }, color: suit },
+      { geo: tube(REST.shoulderX, elbowY, wristY, 0.06, 0.049), bone: BI.foreR, blend: { atY: elbowY, other: BI.armR, range: 0.09 }, color: suit },
+      { geo: ball(-REST.shoulderX, wristY - 0.05, 0.056, 1.35), bone: BI.foreL, color: skin },
+      { geo: ball(REST.shoulderX, wristY - 0.05, 0.056, 1.35), bone: BI.foreR, color: skin },
+      // shoulder & joint balls for smooth silhouettes
+      { geo: ball(-REST.shoulderX, shoulderY, 0.097), bone: BI.armL, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
+      { geo: ball(REST.shoulderX, shoulderY, 0.097), bone: BI.armR, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
+      { geo: ball(-REST.shoulderX, elbowY, 0.066), bone: BI.foreL, blend: { atY: elbowY, other: BI.armL, range: 0.09 }, color: suit },
+      { geo: ball(REST.shoulderX, elbowY, 0.066), bone: BI.foreR, blend: { atY: elbowY, other: BI.armR, range: 0.09 }, color: suit },
+      // legs
+      { geo: tube(-REST.hipX, hipY, kneeY, 0.095, 0.068), bone: BI.legL, blend: { atY: hipY, other: BI.pelvis, range: 0.1 }, color: pants },
+      { geo: tube(REST.hipX, hipY, kneeY, 0.095, 0.068), bone: BI.legR, blend: { atY: hipY, other: BI.pelvis, range: 0.1 }, color: pants },
+      { geo: tube(-REST.hipX, kneeY, ankleY, 0.062, 0.048), bone: BI.shinL, blend: { atY: kneeY, other: BI.legL, range: 0.1 }, color: pants },
+      { geo: tube(REST.hipX, kneeY, ankleY, 0.062, 0.048), bone: BI.shinR, blend: { atY: kneeY, other: BI.legR, range: 0.1 }, color: pants },
+      { geo: ball(-REST.hipX, hipY, 0.1), bone: BI.legL, blend: { atY: hipY, other: BI.pelvis, range: 0.12 }, color: pants },
+      { geo: ball(REST.hipX, hipY, 0.1), bone: BI.legR, blend: { atY: hipY, other: BI.pelvis, range: 0.12 }, color: pants },
+      { geo: ball(-REST.hipX, kneeY, 0.072), bone: BI.shinL, blend: { atY: kneeY, other: BI.legL, range: 0.09 }, color: pants },
+      { geo: ball(REST.hipX, kneeY, 0.072), bone: BI.shinR, blend: { atY: kneeY, other: BI.legR, range: 0.09 }, color: pants },
+    ];
+    for (const p of parts) skinPart(p);
+    const merged = mergeGeometries(parts.map((p) => p.geo));
+    for (const p of parts) p.geo.dispose();
+    merged.computeVertexNormals();
+
+    const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
+    this.fadeMats.push(bodyMat);
+    const skinned = new THREE.SkinnedMesh(merged, bodyMat);
+    skinned.castShadow = true;
+    skinned.frustumCulled = false; // animated bounds; a handful of characters
+    this.root.add(skinned);
+    skinned.add(this.pelvis);
+    skinned.updateMatrixWorld(true);
+    skinned.bind(new THREE.Skeleton(bones));
+
+    // ---- attached details (regular meshes riding on bones) ----
+    const attach = (bone: THREE.Bone, mesh: THREE.Mesh) => { mesh.castShadow = true; bone.add(mesh); };
+    const bootM = new THREE.MeshStandardMaterial({ color: 0x241f1a, roughness: 0.85 });
+    for (const shin of [this.shinL, this.shinR]) {
+      const bootBox = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.26), bootM);
+      bootBox.position.set(0, -0.4, 0.05);
+      attach(shin, bootBox);
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.1, 8), bootM);
+      cuff.position.set(0, -0.36, 0);
+      attach(shin, cuff);
+    }
+    if (style.cap != null) {
+      const capM = mat(style.cap, { flat: true });
+      const capTop = new THREE.Mesh(new THREE.CylinderGeometry(0.145, 0.155, 0.09, 10), capM);
+      capTop.position.set(0, 0.33, 0);
+      attach(this.headG, capTop);
+      const brim = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.03, 0.13), capM);
+      brim.position.set(0, 0.29, 0.2);
+      attach(this.headG, brim);
+    } else {
+      const hairM = new THREE.MeshStandardMaterial({ color: 0x27221c, roughness: 0.9 });
+      this.fadeMats.push(hairM);
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.152, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM);
+      hair.scale.set(1.02, 1.15, 1.04);
+      hair.position.set(0, 0.185, -0.012);
+      attach(this.headG, hair);
+    }
+    if (style.officer) {
+      const gold = mat(PALETTE.gold);
+      for (const s of [-1, 1]) {
+        const ep = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.14), gold);
+        ep.position.set(s * 0.28, 0.6, 0);
+        attach(this.torso, ep);
+      }
+    }
+
+    // soft contact shadow
     const blob = new THREE.Mesh(
       new THREE.CircleGeometry(0.46, 18),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.24, depthWrite: false })
@@ -59,68 +235,7 @@ export class Humanoid {
     blob.position.y = 0.02;
     this.root.add(blob);
 
-    this.pelvis = new THREE.Group();
-    this.pelvis.position.y = 0.96;
-    this.root.add(this.pelvis);
-    B(0.42, 0.24, 0.26, pants, 0, 0.02, 0, this.pelvis);
-
-    this.torso = new THREE.Group();
-    this.torso.position.y = 0.14;
-    this.pelvis.add(this.torso);
-    B(0.48, 0.58, 0.28, suit, 0, 0.32, 0, this.torso);
-    // shoulders detail
-    B(0.54, 0.12, 0.3, suit, 0, 0.58, 0, this.torso);
-    if (style.officer) {
-      B(0.1, 0.04, 0.31, mat(PALETTE.gold), -0.2, 0.62, 0, this.torso); // epaulettes
-      B(0.1, 0.04, 0.31, mat(PALETTE.gold), 0.2, 0.62, 0, this.torso);
-    }
-
-    this.headG = new THREE.Group();
-    this.headG.position.y = 0.72;
-    this.torso.add(this.headG);
-    B(0.14, 0.16, 0.15, skin, 0, -0.04, 0, this.headG); // neck: keeps the head visually connected in leaned poses
-    B(0.26, 0.28, 0.26, skin, 0, 0.14, 0, this.headG);
-    if (style.cap != null) {
-      const capM = mat(style.cap, { flat: true });
-      B(0.28, 0.1, 0.28, capM, 0, 0.31, 0, this.headG);
-      B(0.28, 0.04, 0.14, capM, 0, 0.27, 0.19, this.headG); // brim (faces +Z = forward)
-    } else {
-      B(0.27, 0.08, 0.27, mat(0x27221c, { flat: true }), 0, 0.3, 0, this.headG); // hair
-    }
-
-    // arms — pivot at shoulder
-    const mkArm = (side: number): [THREE.Group, THREE.Group] => {
-      const sh = new THREE.Group();
-      sh.position.set(side * 0.31, 0.56, 0);
-      this.torso.add(sh);
-      B(0.14, 0.34, 0.16, suit, 0, -0.16, 0, sh);
-      const el = new THREE.Group();
-      el.position.y = -0.33;
-      sh.add(el);
-      B(0.12, 0.3, 0.13, suit, 0, -0.13, 0, el);
-      B(0.11, 0.1, 0.12, skin, 0, -0.3, 0, el); // hand
-      return [sh, el];
-    };
-    [this.armL, this.foreL] = mkArm(-1);
-    [this.armR, this.foreR] = mkArm(1);
-
-    // legs — pivot at hip
-    const mkLeg = (side: number): [THREE.Group, THREE.Group] => {
-      const hip = new THREE.Group();
-      hip.position.set(side * 0.13, -0.08, 0);
-      this.pelvis.add(hip);
-      B(0.17, 0.4, 0.19, pants, 0, -0.2, 0, hip);
-      const knee = new THREE.Group();
-      knee.position.y = -0.4;
-      hip.add(knee);
-      B(0.15, 0.38, 0.16, pants, 0, -0.19, 0, knee);
-      B(0.16, 0.1, 0.26, mat(0x2a251f, { flat: true }), 0, -0.42, 0.04, knee); // boot
-      return [hip, knee];
-    };
-    [this.legL, this.shinL] = mkLeg(-1);
-    [this.legR, this.shinR] = mkLeg(1);
-
-    // weapon
+    // ---- weapon ----
     this.weaponG = new THREE.Group();
     this.foreR.add(this.weaponG);
     this.weaponG.position.set(0, -0.32, 0.05);
@@ -160,9 +275,8 @@ export class Humanoid {
     this.weaponG.add(this.flashTarget);
     this.flashTarget.position.set(0, 0, 6);
     this.flashlight.target = this.flashTarget;
-    // visible beam shaft
     const geo = new THREE.CylinderGeometry(1.7, 0.05, 8, 12, 1, true);
-    geo.rotateX(Math.PI / 2); // axis -> +Z, wide end far
+    geo.rotateX(Math.PI / 2);
     const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       color: 0xffe9b8, transparent: true, opacity: 0.045,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
@@ -172,10 +286,6 @@ export class Humanoid {
     this.weaponG.add(beam);
   }
 
-  /**
-   * @param speed horizontal speed m/s
-   * @param headYaw local head turn (radians) e.g. guard scanning
-   */
   update(dt: number, p: {
     speed: number; run?: boolean; crouch?: boolean; aim?: boolean;
     pitch?: number; headYaw?: number; dead?: boolean; carried?: boolean; cover?: boolean;
@@ -185,12 +295,9 @@ export class Humanoid {
       if (this.deadT < 0) this.deadT = 0;
       this.deadT += dt;
       const t = Math.min(1, this.deadT * 2.2);
-      const e = 1 - (1 - t) * (1 - t); // ease out
-      this.root.rotation.x = p.carried ? 0 : lerp(this.root.rotation.x, -Math.PI / 2, e * 0.2 + (t === 1 ? 1 : 0));
-      // simpler: rotate about local X to fall backward-ish
+      const e = 1 - (1 - t) * (1 - t);
       this.root.rotation.x = -e * (Math.PI / 2) * 0.98;
-      this.pelvis.position.y = lerp(0.96, 0.45, e);
-      // limbs sprawl
+      this.pelvis.position.y = lerp(REST.pelvisY, 0.45, e);
       this.armL.rotation.z = lerp(this.armL.rotation.z, 0.9, e);
       this.armR.rotation.z = lerp(this.armR.rotation.z, -1.1, e);
       this.armL.rotation.x = this.armR.rotation.x = 0;
@@ -211,13 +318,14 @@ export class Humanoid {
     const swing2 = moving ? Math.sin(this.phase + Math.PI) : 0;
     const amp = (p.run ? 0.85 : 0.55) * (1 - c * 0.4);
 
-    // crouch pose (see CROUCH_TUNE below: deep hips + hunched torso)
     const CT = CROUCH_TUNE;
     this.pelvis.rotation.x = c * CT.pelvisRotX;
     this.pelvis.position.z = CT.pelvisZ * c;
     this.torso.rotation.x = c * CT.torso + (p.run && moving ? 0.14 : 0) - (p.pitch ?? 0) * 0.25 * a;
     this.headG.rotation.x = c * CT.head + (p.pitch ?? 0) * 0.5;
     this.headG.rotation.y = damp(this.headG.rotation.y, p.headYaw ?? 0, 8, dt);
+    // breathing: subtle chest rise when still
+    if (!moving) this.torso.rotation.x += Math.sin(this.phase + performance.now() * 0.0012) * 0.008;
 
     // NOTE joint sign convention (character faces +Z): hip flexion (thigh
     // swings FORWARD) is NEGATIVE rotation.x; knee flexion (heel folds BACK
@@ -225,10 +333,8 @@ export class Humanoid {
     const thighBase = -c * CT.thigh;
     const kneeBase = c * CT.knee;
     const strideAmp = amp * (1 - c * 0.5);
-    // staggered stance + slight knee splay make the held crouch read natural
     this.legL.rotation.x = thighBase - c * CT.stagger + swing * strideAmp;
     this.legR.rotation.x = thighBase + c * CT.stagger + swing2 * strideAmp;
-    // splay: left leg is -X, so OUTWARD for it is negative rotation.z
     this.legL.rotation.z = -c * CT.splay;
     this.legR.rotation.z = c * CT.splay;
     const stepL = moving ? Math.max(0, -Math.sin(this.phase - 0.6)) * strideAmp * 1.1 : 0;
@@ -236,8 +342,6 @@ export class Humanoid {
     this.shinL.rotation.x = Math.max(0.001, kneeBase + stepL);
     this.shinR.rotation.x = Math.max(0.001, kneeBase + stepR);
 
-    // pelvis height from the actual leg chain so the feet stay planted at any
-    // crouch depth (thigh 0.40m + shin 0.42m, hip pivot 0.08 below pelvis, boot 0.05)
     const chain = (thigh: number, knee: number) =>
       0.4 * Math.cos(thigh) + 0.42 * Math.cos(thigh + knee);
     const stance = Math.max(
@@ -245,36 +349,28 @@ export class Humanoid {
       chain(this.legR.rotation.x, this.shinR.rotation.x)
     );
     const bob = moving ? Math.abs(Math.cos(this.phase)) * 0.035 * (1 - c * 0.5) : 0;
-    // upright uses the classic fixed height (floating mid-stride feet read
-    // better than a dipping pelvis); crouch grounds to the actual leg chain
-    // so bent knees always plant on the floor (slight press > slight float)
     const chainY = clamp(stance, 0.35, 0.83) + CROUCH_TUNE.lift;
-    this.pelvis.position.y = lerp(0.96, chainY, c) + bob;
+    this.pelvis.position.y = lerp(REST.pelvisY, chainY, c) + bob;
 
-    // arms: swing when moving; crouch pulls them into a guarded ready pose;
-    // aim pose overrides the right arm
     const armAmp = amp * 0.7 * (1 - c * 0.4);
     const idleSway = Math.sin(this.phase * 0.4) * 0.03;
-    const armCrouch = -0.38 * c; // held forward, elbows in
+    const armCrouch = -0.38 * c;
     this.armL.rotation.x = swing2 * armAmp * (1 - a * 0.4) + idleSway + armCrouch;
     this.armL.rotation.z = 0.08 + c * 0.06;
     this.foreL.rotation.x = -0.25 - c * 0.55 - (moving ? Math.abs(swing2) * 0.3 : 0);
 
-    // right arm: blend between swing and aim-forward
     const aimPitch = (p.pitch ?? 0);
     this.armR.rotation.x = lerp(swing * armAmp + idleSway + armCrouch, -Math.PI / 2 + aimPitch, a);
     this.armR.rotation.z = lerp(-0.08 - c * 0.06, 0, a);
     this.foreR.rotation.x = lerp(-0.25 - c * 0.55 - (moving ? Math.abs(swing) * 0.3 : 0), 0, a);
-    this.weaponG.rotation.x = lerp(1.2, Math.PI / 2, a); // holstered-ish angle vs level
+    this.weaponG.rotation.x = lerp(1.2, Math.PI / 2, a);
 
-    // left hand supports weapon when aiming
     if (a > 0.5) {
       this.armL.rotation.x = -Math.PI / 2 + aimPitch + 0.15;
       this.armL.rotation.z = 0.5;
       this.foreL.rotation.x = -0.3;
     }
 
-    // flinch: recoil back and hunch when a shot lands but doesn't kill
     if (p.stagger && p.stagger > 0) {
       const st = p.stagger;
       this.torso.rotation.x -= st * 0.35;
@@ -284,7 +380,6 @@ export class Humanoid {
       this.pelvis.position.z -= st * 0.1;
     }
 
-    // back-to-wall cover: pressed flat, arms spread against the surface
     if (p.cover && a < 0.5) {
       this.torso.rotation.x = -0.09;
       this.headG.rotation.x = 0.05;
@@ -307,13 +402,10 @@ export class Humanoid {
   }
 
   setOpacity(o: number) {
-    for (const m of this.meshes) {
-      const mm = m.material as THREE.MeshLambertMaterial;
+    for (const m of this.fadeMats) {
+      const mm = m as THREE.MeshStandardMaterial;
       if (o >= 1) { mm.transparent = false; mm.opacity = 1; }
-      else {
-        if (!mm.transparent) { m.material = mm.clone(); (m.material as THREE.MeshLambertMaterial).transparent = true; }
-        (m.material as THREE.MeshLambertMaterial).opacity = o;
-      }
+      else { mm.transparent = true; mm.opacity = o; }
     }
   }
 }
