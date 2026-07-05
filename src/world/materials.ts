@@ -249,14 +249,23 @@ export function grassBladeTexture(): THREE.Texture {
   const [c, ctx] = makeCanvas(size);
   const rng = seededRandom(4242);
   ctx.clearRect(0, 0, size, size);
-  for (let i = 0; i < 9; i++) {
-    const baseX = 8 + i * 14 + rng() * 8;
-    const tipX = baseX + (rng() - 0.5) * 44;
-    const tipY = 4 + rng() * 34;
-    const w = 4.5 + rng() * 4;
+  // dense sheaf: many thin overlapping blades so one card reads as a clump,
+  // not three lonely sprigs; a few dark blades give depth
+  for (let i = 0; i < 17; i++) {
+    const baseX = 4 + rng() * 120;
+    const tipX = baseX + (rng() - 0.5) * 56;
+    const tipY = 2 + rng() * 46;
+    const w = 2.2 + rng() * 2.6;
+    const dark = rng() < 0.3;
     const grad = ctx.createLinearGradient(0, size, 0, tipY);
-    grad.addColorStop(0, "rgb(132, 142, 92)");
-    grad.addColorStop(1, "rgb(228, 235, 190)");
+    if (dark) {
+      grad.addColorStop(0, "rgb(96, 108, 64)");
+      grad.addColorStop(1, "rgb(168, 178, 118)");
+    } else {
+      grad.addColorStop(0, "rgb(124, 138, 82)");
+      grad.addColorStop(0.55, "rgb(176, 188, 122)");
+      grad.addColorStop(1, "rgb(226, 232, 178)");
+    }
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(baseX - w, size);

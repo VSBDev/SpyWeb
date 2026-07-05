@@ -70,16 +70,16 @@ function skinPart(part: SkinPart) {
 }
 
 /** vertical tapered tube positioned in rest space */
-function tube(x: number, topY: number, botY: number, rTop: number, rBot: number, radial = 10): THREE.BufferGeometry {
+function tube(x: number, topY: number, botY: number, rTop: number, rBot: number, radial = 12): THREE.BufferGeometry {
   const h = topY - botY;
   const geo = new THREE.CylinderGeometry(rTop, rBot, h, radial, 3);
   geo.translate(x, botY + h / 2, 0);
   return geo;
 }
 
-function ball(x: number, y: number, r: number, sy = 1, z = 0): THREE.BufferGeometry {
-  const geo = new THREE.SphereGeometry(r, 10, 7);
-  geo.scale(1, sy, 1);
+function ball(x: number, y: number, r: number, sy = 1, z = 0, sx = 1, sz = 1): THREE.BufferGeometry {
+  const geo = new THREE.SphereGeometry(r, 12, 9);
+  geo.scale(sx, sy, sz);
   geo.translate(x, y, z);
   return geo;
 }
@@ -150,9 +150,16 @@ export class Humanoid {
       // trunk
       { geo: tube(0, 1.06, 0.85, 0.195, 0.185), bone: BI.pelvis, color: pants },
       { geo: tube(0, shoulderY + 0.02, 1.02, 0.2, 0.165), bone: BI.torso, blend: { atY: 1.06, other: BI.pelvis, range: 0.14 }, color: suit },
-      // neck + head
-      { geo: tube(0, headBase + 0.06, headBase - 0.16, 0.062, 0.075), bone: BI.head, blend: { atY: headBase - 0.16, other: BI.torso, range: 0.1 }, color: skin },
-      { geo: ball(0, headBase + 0.17, 0.15, 1.18), bone: BI.head, color: skin },
+      // shoulder yoke: trapezius/upper-chest mass bridging torso and deltoids
+      { geo: ball(0, shoulderY + 0.005, 0.148, 0.55, -0.005, 1.75, 0.9), bone: BI.torso, color: suit },
+      // neck + collar + head (cranium, jaw, nose, ears — not just a sphere)
+      { geo: tube(0, headBase + 0.06, headBase - 0.16, 0.066, 0.08), bone: BI.head, blend: { atY: headBase - 0.16, other: BI.torso, range: 0.1 }, color: skin },
+      { geo: tube(0, headBase - 0.1, headBase - 0.2, 0.095, 0.11), bone: BI.torso, color: suit },
+      { geo: ball(0, headBase + 0.185, 0.147, 1.06), bone: BI.head, color: skin },
+      { geo: ball(0, headBase + 0.09, 0.098, 1.0, 0.025), bone: BI.head, color: skin },
+      { geo: ball(0, headBase + 0.115, 0.021, 1.25, 0.132), bone: BI.head, color: skin },
+      { geo: ball(-0.138, headBase + 0.165, 0.03, 1.25, -0.01), bone: BI.head, color: skin },
+      { geo: ball(0.138, headBase + 0.165, 0.03, 1.25, -0.01), bone: BI.head, color: skin },
       // arms
       { geo: tube(-REST.shoulderX, shoulderY, elbowY, 0.075, 0.063), bone: BI.armL, blend: { atY: shoulderY, other: BI.torso, range: 0.09 }, color: suit },
       { geo: tube(REST.shoulderX, shoulderY, elbowY, 0.075, 0.063), bone: BI.armR, blend: { atY: shoulderY, other: BI.torso, range: 0.09 }, color: suit },
@@ -160,9 +167,9 @@ export class Humanoid {
       { geo: tube(REST.shoulderX, elbowY, wristY, 0.06, 0.049), bone: BI.foreR, blend: { atY: elbowY, other: BI.armR, range: 0.09 }, color: suit },
       { geo: ball(-REST.shoulderX, wristY - 0.05, 0.056, 1.35), bone: BI.foreL, color: skin },
       { geo: ball(REST.shoulderX, wristY - 0.05, 0.056, 1.35), bone: BI.foreR, color: skin },
-      // shoulder & joint balls for smooth silhouettes
-      { geo: ball(-REST.shoulderX, shoulderY, 0.097), bone: BI.armL, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
-      { geo: ball(REST.shoulderX, shoulderY, 0.097), bone: BI.armR, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
+      // deltoids & joint balls for smooth silhouettes
+      { geo: ball(-REST.shoulderX, shoulderY + 0.01, 0.088, 0.95), bone: BI.armL, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
+      { geo: ball(REST.shoulderX, shoulderY + 0.01, 0.088, 0.95), bone: BI.armR, blend: { atY: shoulderY, other: BI.torso, range: 0.12 }, color: suit },
       { geo: ball(-REST.shoulderX, elbowY, 0.066), bone: BI.foreL, blend: { atY: elbowY, other: BI.armL, range: 0.09 }, color: suit },
       { geo: ball(REST.shoulderX, elbowY, 0.066), bone: BI.foreR, blend: { atY: elbowY, other: BI.armR, range: 0.09 }, color: suit },
       // legs
@@ -201,6 +208,17 @@ export class Humanoid {
       cuff.position.set(0, -0.36, 0);
       attach(shin, cuff);
     }
+    const hairM = new THREE.MeshStandardMaterial({ color: 0x2b241c, roughness: 0.92 });
+    this.fadeMats.push(hairM);
+    const nape = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 7), hairM);
+    nape.scale.set(1.3, 0.7, 0.75);
+    nape.position.set(0, 0.1, -0.09);
+    attach(this.headG, nape);
+    for (const s of [-1, 1]) {
+      const burn = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.04), hairM);
+      burn.position.set(s * 0.126, 0.15, 0.025);
+      attach(this.headG, burn);
+    }
     if (style.cap != null) {
       const capM = mat(style.cap, { flat: true });
       const capTop = new THREE.Mesh(new THREE.CylinderGeometry(0.145, 0.155, 0.09, 10), capM);
@@ -210,12 +228,18 @@ export class Humanoid {
       brim.position.set(0, 0.29, 0.2);
       attach(this.headG, brim);
     } else {
-      const hairM = new THREE.MeshStandardMaterial({ color: 0x27221c, roughness: 0.9 });
-      this.fadeMats.push(hairM);
-      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.152, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM);
-      hair.scale.set(1.02, 1.15, 1.04);
-      hair.position.set(0, 0.185, -0.012);
-      attach(this.headG, hair);
+      // sculpted 60s crop: crown shell tilted back so the rim rides high on
+      // the forehead and low over the nape; a flat sweep hugs the crown front
+      const shell = new THREE.Mesh(new THREE.SphereGeometry(0.155, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.52), hairM);
+      shell.scale.set(1.03, 1.05, 1.05);
+      shell.position.set(0, 0.215, -0.025);
+      shell.rotation.x = 0.22;
+      attach(this.headG, shell);
+      const sweep = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 7), hairM);
+      sweep.scale.set(1.5, 0.45, 0.85);
+      sweep.position.set(0, 0.3, 0.05);
+      sweep.rotation.x = 0.05;
+      attach(this.headG, sweep);
     }
     if (style.officer) {
       const gold = mat(PALETTE.gold);

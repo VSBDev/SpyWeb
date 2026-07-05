@@ -301,12 +301,22 @@ function growBranch(
 
 function leafCluster(g: THREE.Group, rng: () => number, tones: THREE.Material[], cardTint: number, size: number) {
   return (tip: THREE.Vector3) => {
-    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(size * (0.8 + rng() * 0.4), 0), tones[Math.floor(rng() * tones.length)]);
+    // subdivided lobes (not icosa-0 crystals): one main mass + 1-2 satellites
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(size * (0.8 + rng() * 0.4), 1), tones[Math.floor(rng() * tones.length)]);
     blob.position.copy(tip);
-    blob.scale.y = 0.75;
+    blob.scale.set(1 + (rng() - 0.5) * 0.3, 0.72, 1 + (rng() - 0.5) * 0.3);
     blob.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     blob.castShadow = true;
     g.add(blob);
+    const sats = 1 + Math.floor(rng() * 2);
+    for (let i = 0; i < sats; i++) {
+      const s = new THREE.Mesh(new THREE.IcosahedronGeometry(size * (0.45 + rng() * 0.25), 1), tones[Math.floor(rng() * tones.length)]);
+      s.position.copy(tip).add(new THREE.Vector3((rng() - 0.5) * size * 1.3, (rng() - 0.3) * size * 0.7, (rng() - 0.5) * size * 1.3));
+      s.scale.y = 0.75;
+      s.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+      s.castShadow = true;
+      g.add(s);
+    }
     const cardM = leafMat(cardTint);
     for (let i = 0; i < 2; i++) {
       const card = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.9, size * 1.5), cardM);
@@ -320,26 +330,28 @@ function leafCluster(g: THREE.Group, rng: () => number, tones: THREE.Material[],
 export function cypress(h = 6, seed = 1): THREE.Group {
   const g = new THREE.Group();
   const rng = seededRandom(seed);
-  const tones = [mat(0x2c4230, { flat: true }), mat(0x39523a, { flat: true }), mat(0x435c40, { flat: true })];
+  const tones = [mat(0x3a5540, { flat: true }), mat(0x46614a, { flat: true }), mat(0x527051, { flat: true })];
   const trunk = box(0.2, 0.8, 0.2, mat(PALETTE.woodDark), 0, 0.4, 0);
   g.add(trunk);
-  // irregular stacked cones with a natural bulge profile and slight lean
-  const levels = 6;
+  // smooth flame: overlapping stretched ellipsoids, widest low, tapering tip
   const lean = (rng() - 0.5) * 0.12;
-  for (let i = 0; i < levels; i++) {
-    const t = i / (levels - 1);
-    // widest ~30% up, tapering to a point
-    const profile = (0.55 + 1.9 * t * (1 - t)) * (1 - t * 0.82) + (t > 0.9 ? 0.02 : 0.06);
-    const r = profile * (0.85 + rng() * 0.25) * (h / 6);
-    const segH = (h / levels) * 1.6;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(r, segH, 7), tones[i % tones.length]);
-    const y = 0.55 + t * (h - 1.1);
-    cone.position.set(lean * y + (rng() - 0.5) * 0.07, y + segH / 2 - 0.5, (rng() - 0.5) * 0.07);
-    cone.rotation.y = rng() * Math.PI;
-    cone.rotation.z = (rng() - 0.5) * 0.05;
-    cone.castShadow = true;
-    g.add(cone);
+  const lobes = 4;
+  for (let i = 0; i < lobes; i++) {
+    const t = i / (lobes - 1);
+    const r = (0.62 - t * 0.4) * (0.9 + rng() * 0.25) * (h / 6);
+    const segH = (h * 0.42) * (1 - t * 0.35);
+    const lobe = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), tones[i % tones.length]);
+    const y = 0.85 + t * (h - 1.5);
+    lobe.scale.set(1, segH / r, 1);
+    lobe.position.set(lean * y + (rng() - 0.5) * 0.06, y + segH * 0.35, (rng() - 0.5) * 0.06);
+    lobe.rotation.y = rng() * Math.PI;
+    lobe.castShadow = true;
+    g.add(lobe);
   }
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.14 * (h / 6), h * 0.22, 6), tones[2]);
+  tip.position.set(lean * h, h - 0.2, 0);
+  tip.castShadow = true;
+  g.add(tip);
   // soft fringe: tall leaf cards crossed through the column
   const fringe = leafMat(0x44603f);
   for (let i = 0; i < 3; i++) {
@@ -356,7 +368,7 @@ export function oliveTree(seed = 1): THREE.Group {
   const g = new THREE.Group();
   const rng = seededRandom(seed);
   const bark = mat(0x6b5744, { flat: true });
-  const tones = [mat(0x7d8756, { flat: true }), mat(0x93a06b, { flat: true }), mat(0x869560, { flat: true })];
+  const tones = [mat(0x8a9464, { flat: true }), mat(0xa3b07c, { flat: true }), mat(0x96a570, { flat: true })];
   const leaf = leafCluster(g, rng, tones, 0x9aa877, 0.55 + rng() * 0.2);
   // gnarled trunk splitting into 3-4 primaries, each branching twice
   const trunkTop = new THREE.Vector3((rng() - 0.5) * 0.3, 1.0 + rng() * 0.4, (rng() - 0.5) * 0.3);
@@ -431,13 +443,19 @@ export function pineTree(seed = 1): THREE.Group {
   const rng = seededRandom(seed);
   const h = 5 + rng() * 2.5;
   const bark = mat(0x7a5f47, { flat: true });
-  const tones = [mat(0x3f5a38, { flat: true }), mat(0x4c6a40, { flat: true })];
+  const tones = [mat(0x4c6a44, { flat: true }), mat(0x5a7a4e, { flat: true })];
   const flatLeaf = (tip: THREE.Vector3) => {
-    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 + rng() * 0.5, 0), tones[Math.floor(rng() * 2)]);
-    blob.scale.y = 0.32;
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 + rng() * 0.5, 1), tones[Math.floor(rng() * 2)]);
+    blob.scale.set(1 + (rng() - 0.5) * 0.3, 0.36, 1 + (rng() - 0.5) * 0.3);
+    blob.rotation.y = rng() * Math.PI;
     blob.position.copy(tip);
     blob.castShadow = true;
     g.add(blob);
+    const under = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + rng() * 0.3, 1), tones[0]);
+    under.scale.set(1, 0.32, 1);
+    under.position.copy(tip).add(new THREE.Vector3((rng() - 0.5) * 0.7, -0.12, (rng() - 0.5) * 0.7));
+    under.castShadow = true;
+    g.add(under);
     const card = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.2), leafMat(0x6a8352));
     card.position.copy(tip).setY(tip.y + 0.15);
     card.rotation.set(-Math.PI / 2 + (rng() - 0.5) * 0.5, rng() * Math.PI, 0);
@@ -602,16 +620,17 @@ export function grassPatch(radius = 2, seed = 1): THREE.Group {
   const tints = [0xb5bb7e, 0x84a05e];
   const buckets: THREE.BufferGeometry[][] = [[], []];
   const tmp = new THREE.Object3D();
-  const clumps = Math.floor(radius * radius * 3.2);
+  const clumps = Math.floor(radius * radius * 5.2);
   for (let i = 0; i < clumps; i++) {
     const a = rng() * Math.PI * 2;
     const r = Math.sqrt(rng()) * radius;
-    const h = 0.85 + rng() * 0.55;
-    const w = 0.7 + rng() * 0.5;
+    const edge = r / radius; // shorter, paler toward the rim
+    const h = (0.8 + rng() * 0.55) * (1 - edge * 0.35);
+    const w = 0.55 + rng() * 0.45;
     const bucket = rng() < 0.55 ? 0 : 1;
     const yaw = rng() * Math.PI;
-    // crossed pair of quads per clump
-    for (const cross of [0, Math.PI / 2]) {
+    // three crossed quads per clump — full from every view angle
+    for (const cross of [0, Math.PI / 3, (Math.PI * 2) / 3]) {
       const quad = new THREE.PlaneGeometry(w, h, 1, 2);
       quad.translate(0, h / 2 - 0.02, 0);
       tmp.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);

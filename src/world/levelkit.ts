@@ -664,14 +664,17 @@ export function buildLevel(def: LevelDef): LevelRuntime {
       if (h > 20 && rngF() < 0.6) continue;
       const s = 1.6 + rngF() * 2.6;
       const isCypress = rngF() < 0.45;
-      // toNonIndexed: cones are indexed, icosahedra aren't — merges need one or the other
+      // subdivided crowns so the horizon reads as forest, not pyramids;
+      // both shapes are non-indexed after toNonIndexed for the merge
       const crown = isCypress
-        ? new THREE.ConeGeometry(s * 0.32, s * 1.5, 5).toNonIndexed()
-        : new THREE.IcosahedronGeometry(s * 0.55, 0);
+        ? new THREE.IcosahedronGeometry(s * 0.34, 1)
+        : new THREE.IcosahedronGeometry(s * 0.55, 1);
       tmpF.position.set(x - cx, h + (isCypress ? s * 0.75 : s * 0.72), z - cz);
       tmpF.rotation.set(0, rngF() * Math.PI, 0);
+      tmpF.scale.set(1, isCypress ? 2.4 : 0.85, 1);
       tmpF.updateMatrix();
       crown.applyMatrix4(tmpF.matrix);
+      tmpF.scale.set(1, 1, 1);
       crownBuckets[rngF() < 0.5 ? 0 : 1].push(crown);
       const trunk = new THREE.CylinderGeometry(0.1 * s, 0.14 * s, s * 0.7, 5).toNonIndexed();
       tmpF.position.set(x - cx, h + s * 0.3, z - cz);
@@ -688,8 +691,8 @@ export function buildLevel(def: LevelDef): LevelRuntime {
       mesh.position.set(cx, 0, cz);
       group.add(mesh);
     };
-    bakeF(crownBuckets[0], mat(night ? 0x2c3d33 : 0x3f5a38, { flat: true }));
-    bakeF(crownBuckets[1], mat(night ? 0x35473a : 0x527048, { flat: true }));
+    bakeF(crownBuckets[0], mat(night ? 0x2c3d33 : 0x4a6544, { flat: true }));
+    bakeF(crownBuckets[1], mat(night ? 0x35473a : 0x5c7a52, { flat: true }));
     bakeF(trunkGeos, mat(0x6b5744, { flat: true }));
   }
 
@@ -860,26 +863,33 @@ export function buildLevel(def: LevelDef): LevelRuntime {
       mesh.receiveShadow = true;
       group.add(mesh);
     };
-    // grass tufts, two tones — crossed wind-swayed blade quads
+    // grass tufts, two tones — clustered clumps (nature grows in patches,
+    // not an even sprinkle), each a 3-way crossed sheaf of blade quads
     const tuftBuckets: THREE.BufferGeometry[][] = [[], []];
-    const tuftCount = Math.min(420, Math.floor(area / 28));
-    for (let i = 0; i < tuftCount; i++) {
+    const clusterCount = Math.min(230, Math.floor(area / 52));
+    for (let i = 0; i < clusterCount; i++) {
       const p = pick();
       if (!p) continue;
-      const h = 0.28 + rng2() * 0.34;
-      const w = 0.32 + rng2() * 0.28;
-      const bucket = rng2() < 0.55 ? 0 : 1;
-      const yaw = rng2() * Math.PI;
-      for (const cross of [0, Math.PI / 2]) {
-        const quad = new THREE.PlaneGeometry(w, h, 1, 2);
-        quad.translate(0, h / 2 - 0.02, 0);
-        tmp.position.set(p[0], 0, p[1]);
-        tmp.rotation.set(0, yaw + cross, (rng2() - 0.5) * 0.12);
-        tmp.updateMatrix();
-        quad.applyMatrix4(tmp.matrix);
-        tuftBuckets[bucket].push(quad);
+      const members = 2 + Math.floor(rng2() * 4);
+      for (let k = 0; k < members; k++) {
+        const px = p[0] + (rng2() - 0.5) * 2.4;
+        const pz = p[1] + (rng2() - 0.5) * 2.4;
+        if (blocked(px, pz)) continue;
+        const h = 0.3 + rng2() * 0.38;
+        const w = 0.34 + rng2() * 0.3;
+        const bucket = rng2() < 0.55 ? 0 : 1;
+        const yaw = rng2() * Math.PI;
+        for (const cross of [0, Math.PI / 3, (Math.PI * 2) / 3]) {
+          const quad = new THREE.PlaneGeometry(w, h, 1, 2);
+          quad.translate(0, h / 2 - 0.02, 0);
+          tmp.position.set(px, 0, pz);
+          tmp.rotation.set(0, yaw + cross, (rng2() - 0.5) * 0.12);
+          tmp.updateMatrix();
+          quad.applyMatrix4(tmp.matrix);
+          tuftBuckets[bucket].push(quad);
+        }
+        tmp.rotation.set(0, 0, 0);
       }
-      tmp.rotation.set(0, 0, 0);
     }
     bake(tuftBuckets[0], grassMat(night ? 0x8a8f68 : 0xb5bb7e));
     bake(tuftBuckets[1], grassMat(night ? 0x74855f : 0x84a05e));

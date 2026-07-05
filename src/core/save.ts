@@ -49,8 +49,7 @@ export class SaveSystem {
     this.persist();
   }
 
-  isUnlocked(missionIndex: number, order: string[]): boolean {
-    if (missionIndex <= 1) return true; // tutorial + first compound always open
-    return this.getMission(order[missionIndex - 1]).completed;
+  isUnlocked(_missionIndex: number, _order: string[]): boolean {
+    return true; // every operation is open — play any dossier from scratch
   }
 }
